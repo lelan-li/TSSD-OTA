@@ -27,6 +27,39 @@ VOC_CLASSES = (  # always index 0
     'motorbike', 'person', 'pottedplant',
     'sheep', 'sofa', 'train', 'tvmonitor')
 
+VID_CLASSES = (  # always index 0
+    'n02691156', #1 airplane
+    'n02419796', #2 antelope
+    'n02131653', #3 bear
+    'n02834778', #4 bicycle
+    'n01503061', #5 bird
+    'n02924116', #6 bus
+    'n02958343', #7 car
+    'n02402425', #8 cattle
+    'n02084071', #9 dog
+    'n02121808', #10 domestic_cat
+    'n02503517', #11 elephant
+    'n02118333', #12 fox
+    'n02510455', #13 giant_panda
+    'n02342885', #14 hamster
+    'n02374451', #15 horse
+    'n02129165', #16 lion
+    'n01674464', #17 lizard
+    'n02484322', #18 monkey
+    'n03790512', #19 motorcycle
+    'n02324045', #20 rabbit
+    'n02509815', #21 red_panda
+    'n02411705', #22 sheep
+    'n01726692', #23 snake
+    'n02355227', #24 squirrel
+    'n02129604', #25 tiger
+    'n04468005', #26 train
+    'n01662784', #27 turtle
+    'n04530566', #28 watercraft
+    'n02062744', #29 whale
+    'n02391049', #30 zebra
+)
+
 # for making bounding boxes pretty
 COLORS = ((255, 0, 0, 128), (0, 255, 0, 128), (0, 0, 255, 128),
           (0, 255, 255, 128), (255, 0, 255, 128), (255, 255, 0, 128))
@@ -45,9 +78,15 @@ class AnnotationTransform(object):
         width (int): width
     """
 
-    def __init__(self, class_to_ind=None, keep_difficult=False):
-        self.class_to_ind = class_to_ind or dict(
-            zip(VOC_CLASSES, range(len(VOC_CLASSES))))
+    def __init__(self, class_to_ind=None, keep_difficult=False, dataset_name='VOC0712'):
+
+        self.dataset_name = dataset_name
+        if (self.dataset_name == 'VOC0712'):
+            self.class_to_ind = class_to_ind or dict(
+               zip(VOC_CLASSES, range(len(VOC_CLASSES))))
+        elif (self.dataset_name == 'VID2017'):
+            self.class_to_ind = class_to_ind or dict(
+                zip(VID_CLASSES, range(len(VID_CLASSES))))
         self.keep_difficult = keep_difficult
 
     def __call__(self, target, width, height):
@@ -60,9 +99,10 @@ class AnnotationTransform(object):
         """
         res = []
         for obj in target.iter('object'):
-            difficult = int(obj.find('difficult').text) == 1
-            if not self.keep_difficult and difficult:
-                continue
+            if self.dataset_name=='VOC0712':
+                difficult = int(obj.find('difficult').text) == 1
+                if not self.keep_difficult and difficult:
+                    continue
             name = obj.find('name').text.lower().strip()
             bbox = obj.find('bndbox')
 
@@ -75,7 +115,8 @@ class AnnotationTransform(object):
                 bndbox.append(cur_pt)
             label_idx = self.class_to_ind[name]
             bndbox.append(label_idx)
-            res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
+            if(bndbox != []):
+                res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
             # img_id = target.find('filename').text[:-4]
 
         return res  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
@@ -105,17 +146,32 @@ class VOCDetection(data.Dataset):
         self.transform = transform
         self.target_transform = target_transform
         self.name = dataset_name
-        self._annopath = os.path.join('%s', 'Annotations', '%s.xml')
-        self._imgpath = os.path.join('%s', 'JPEGImages', '%s.jpg')
         self.ids = list()
-        for (year, name) in image_sets:
-            rootpath = os.path.join(self.root, 'VOC' + year)
-            for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
-                self.ids.append((rootpath, line.strip()))
+        if self.name =='VOC0712':
+            self._annopath = os.path.join('%s', 'Annotations', '%s.xml')
+            self._imgpath = os.path.join('%s', 'JPEGImages', '%s.jpg')
+            for (year, name) in image_sets:
+                rootpath = os.path.join(self.root, 'VOC' + year)
+                for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
+                    self.ids.append((rootpath, line.strip()))
+        elif self.name == 'VID2017':
+            self._annopath = os.path.join('%s', 'Annotations', 'VID', 'train', '%s.xml')
+            self._imgpath = os.path.join('%s', 'Data', 'VID', 'train', '%s.JPEG')
+            rootpath = self.root[:-1]
+            for line in open(os.path.join(rootpath, 'ImageSets', 'VID', self.image_set + '.txt')):
+                pos = line.split(' ')
+                self.ids.append((rootpath, pos[0]))
+
 
     def __getitem__(self, index):
-        im, gt, h, w = self.pull_item(index)
 
+        loop_none_gt = True
+        while loop_none_gt:
+            im, gt, h, w = self.pull_item(index)
+            if len(gt) > 0:
+                loop_none_gt = False
+            else:
+                index = index+1
         return im, gt
 
     def __len__(self):
@@ -130,6 +186,14 @@ class VOCDetection(data.Dataset):
 
         if self.target_transform is not None:
             target = self.target_transform(target, width, height)
+            if len(target) == 0:
+                return img, target, height, width
+            # box = target[0]
+            # x_min, y_min, x_max, y_max, _ = box
+            # print(x_min, y_min, x_max, y_max)
+            # img = cv2.rectangle(img, (int(x_min*width),int(y_min*height)), (int(x_max*width),int(y_max*height)), (255,0,0),10)
+            # cv2.imshow('test', img)
+            # cv2.waitKey(0)
 
         if self.transform is not None:
             target = np.array(target)
@@ -138,6 +202,7 @@ class VOCDetection(data.Dataset):
             img = img[:, :, (2, 1, 0)]
             # img = img.transpose(2, 0, 1)
             target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+
         return torch.from_numpy(img).permute(2, 0, 1), target, height, width
         # return torch.from_numpy(img), target, height, width
 

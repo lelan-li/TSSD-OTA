@@ -3,11 +3,11 @@ import os.path
 
 # gets home dir cross platform
 home = os.path.expanduser("~")
-ddir = os.path.join(home,"data/VOCdevkit/")
-
+vocdir = os.path.join(home,"data/VOCdevkit/")
+viddir = os.path.join(home,"data/ILSVRC/")
 # note: if you used our download scripts, this should be right
-VOCroot = ddir # path to VOCdevkit root dir
-
+VOCroot = vocdir # path to VOCdevkit root dir
+VIDroot = viddir
 # default batch size
 BATCHES = 32
 # data reshuffled at every epoch

@@ -7,12 +7,14 @@ import torch.nn.init as init
 import argparse
 from torch.autograd import Variable
 import torch.utils.data as data
-from data import v2, v1, AnnotationTransform, VOCDetection, detection_collate, VOCroot, VOC_CLASSES
+from data import v2, v1, AnnotationTransform, VOCDetection, detection_collate, VOCroot, VIDroot, VOC_CLASSES, VID_CLASSES
 from utils.augmentations import SSDAugmentation
 from layers.modules import MultiBoxLoss
 from ssd import build_ssd
 import numpy as np
 import time
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -36,6 +38,8 @@ parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom t
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--voc_root', default=VOCroot, help='Location of VOC root directory')
+parser.add_argument('--dataset_name', default='VID2017', help='Location of VOC root directory')
+
 args = parser.parse_args()
 
 if args.cuda and torch.cuda.is_available():
@@ -47,12 +51,21 @@ cfg = (v1, v2)[args.version == 'v2']
 
 if not os.path.exists(args.save_folder):
     os.mkdir(args.save_folder)
-
-train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
-# train_sets = 'train'
+if(args.dataset_name=='VOC0712'):
+    train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
+    num_classes = len(VOC_CLASSES) + 1
+    data_root = VOCroot
+elif (args.dataset_name=='VID2017'):
+    train_sets = 'train'
+    num_classes = len(VID_CLASSES) + 1
+    data_root = VIDroot
+else:
+    train_sets = 'train'
+    num_classes = len(VID_CLASSES) + 1
+    data_root = VIDroot
 ssd_dim = 300  # only support 300 now
 means = (104, 117, 123)  # only support voc now
-num_classes = len(VOC_CLASSES) + 1
+
 batch_size = args.batch_size
 accum_batch_size = 32
 iter_size = accum_batch_size / batch_size
@@ -77,7 +90,7 @@ if args.resume:
     print('Resuming training, loading {}...'.format(args.resume))
     ssd_net.load_weights(args.resume)
 else:
-    vgg_weights = torch.load(args.save_folder + args.basenet)
+    vgg_weights = torch.load(args.save_folder + '/../'+ args.basenet)# + '/../'
     print('Loading base network...')
     ssd_net.vgg.load_state_dict(vgg_weights)
 
@@ -102,8 +115,9 @@ if not args.resume:
     ssd_net.loc.apply(weights_init)
     ssd_net.conf.apply(weights_init)
 
-optimizer = optim.SGD(net.parameters(), lr=args.lr,
-                      momentum=args.momentum, weight_decay=args.weight_decay)
+# optimizer = optim.SGD(net.parameters(), lr=args.lr,
+#                       momentum=args.momentum, weight_decay=args.weight_decay)
+optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
 
 
@@ -114,9 +128,9 @@ def train():
     conf_loss = 0
     epoch = 0
     print('Loading Dataset...')
-
-    dataset = VOCDetection(args.voc_root, train_sets, SSDAugmentation(
-        ssd_dim, means), AnnotationTransform())
+    dataset = VOCDetection(data_root, train_sets, SSDAugmentation(
+        ssd_dim, means), AnnotationTransform(dataset_name=args.dataset_name),
+                           dataset_name=args.dataset_name)
 
     epoch_size = len(dataset) // args.batch_size
     print('Training SSD on', dataset.name)
@@ -212,7 +226,7 @@ def train():
                 )
         if iteration % 5000 == 0:
             print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), 'weights/ssd300_0712_' +
+            torch.save(ssd_net.state_dict(), args.save_folder+'ssd300_'+ args.dataset_name + '_' +
                        repr(iteration) + '.pth')
     torch.save(ssd_net.state_dict(), args.save_folder + '' + args.version + '.pth')
 
