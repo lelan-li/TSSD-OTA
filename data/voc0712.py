@@ -59,6 +59,38 @@ VID_CLASSES = (  # always index 0
     'n02062744', #29 whale
     'n02391049', #30 zebra
 )
+VID_CLASSES_name =(  # always index 0
+    'airplane', #1 airplane
+    'antelope', #2 antelope
+    'bear', #3 bear
+    'bicycle', #4 bicycle
+    'bird', #5 bird
+    'bus', #6 bus
+    'car', #7 car
+    'cattle', #8 cattle
+    'dog', #9 dog
+    'domestic_cat', #10 domestic_cat
+    'elephant', #11 elephant
+    'fox', #12 fox
+    'giant_panda', #13 giant_panda
+    'hamster', #14 hamster
+    'horse', #15 horse
+    'lion', #16 lion
+    'lizard', #17 lizard
+    'monkey', #18 monkey
+    'motorcycle', #19 motorcycle
+    'rabbit', #20 rabbit
+    'red_panda', #21 red_panda
+    'sheep', #22 sheep
+    'snake', #23 snake
+    'squirrel', #24 squirrel
+    'tiger', #25 tiger
+    'train', #26 train
+    'turtle', #27 turtle
+    'watercraft', #28 watercraft
+    'whale', #29 whale
+    'zebra', #30 zebra
+)
 
 # for making bounding boxes pretty
 COLORS = ((255, 0, 0, 128), (0, 255, 0, 128), (0, 0, 255, 128),
@@ -140,7 +172,7 @@ class VOCDetection(data.Dataset):
     """
 
     def __init__(self, root, image_sets, transform=None, target_transform=None,
-                 dataset_name='VOC0712'):
+                 dataset_name='VOC0712', phase='train', set_file_name='train'):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
@@ -155,10 +187,10 @@ class VOCDetection(data.Dataset):
                 for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
                     self.ids.append((rootpath, line.strip()))
         elif self.name == 'VID2017':
-            self._annopath = os.path.join('%s', 'Annotations', 'VID', 'train', '%s.xml')
-            self._imgpath = os.path.join('%s', 'Data', 'VID', 'train', '%s.JPEG')
+            self._annopath = os.path.join('%s', 'Annotations', 'VID', phase, '%s.xml')
+            self._imgpath = os.path.join('%s', 'Data', 'VID', phase, '%s.JPEG')
             rootpath = self.root[:-1]
-            for line in open(os.path.join(rootpath, 'ImageSets', 'VID', self.image_set + '.txt')):
+            for line in open(os.path.join(rootpath, 'ImageSets', 'VID', set_file_name + '.txt')):
                 pos = line.split(' ')
                 self.ids.append((rootpath, pos[0]))
 

@@ -7,14 +7,14 @@ import torch.nn.init as init
 import argparse
 from torch.autograd import Variable
 import torch.utils.data as data
-from data import v2, v1, AnnotationTransform, VOCDetection, detection_collate, VOCroot, VIDroot, VOC_CLASSES, VID_CLASSES
+from data import v2, v1, AnnotationTransform, BaseTransform, VOCDetection, detection_collate, VOCroot, VIDroot, VOC_CLASSES, VID_CLASSES
 from utils.augmentations import SSDAugmentation
 from layers.modules import MultiBoxLoss
 from ssd import build_ssd
 import numpy as np
 import time
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Trai
 parser.add_argument('--version', default='v2', help='conv11_2(v2) or pool6(v1) as last layer')
 parser.add_argument('--basenet', default='vgg16_reducedfc.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
-parser.add_argument('--batch_size', default=16, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=32, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint')
 parser.add_argument('--num_workers', default=2, type=int, help='Number of workers used in dataloading')
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
@@ -38,7 +38,10 @@ parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom t
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='weights/', help='Location to save checkpoint models')
 parser.add_argument('--voc_root', default=VOCroot, help='Location of VOC root directory')
-parser.add_argument('--dataset_name', default='VID2017', help='Location of VOC root directory')
+parser.add_argument('--dataset_name', default='VID2017', help='Which dataset')
+parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
+parser.add_argument('--no_argumentation', action='store_true', help='data argumentation or not')
+parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 
 args = parser.parse_args()
 
@@ -63,15 +66,15 @@ else:
     train_sets = 'train'
     num_classes = len(VID_CLASSES) + 1
     data_root = VIDroot
-ssd_dim = 300  # only support 300 now
+ssd_dim = args.ssd_dim  # only support 300 now
 means = (104, 117, 123)  # only support voc now
 
 batch_size = args.batch_size
 accum_batch_size = 32
 iter_size = accum_batch_size / batch_size
-max_iter = 120000
 weight_decay = 0.0005
-stepvalues = (80000, 100000, 120000)
+stepvalues = args.step_list
+max_iter = args.step_list[-1]
 gamma = 0.1
 momentum = 0.9
 
@@ -79,7 +82,7 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-ssd_net = build_ssd('train', 300, num_classes)
+ssd_net = build_ssd('train', ssd_dim, num_classes)
 net = ssd_net
 
 if args.cuda:
@@ -90,7 +93,7 @@ if args.resume:
     print('Resuming training, loading {}...'.format(args.resume))
     ssd_net.load_weights(args.resume)
 else:
-    vgg_weights = torch.load(args.save_folder + '/../'+ args.basenet)# + '/../'
+    vgg_weights = torch.load(args.save_folder + args.basenet)# + '/../'
     print('Loading base network...')
     ssd_net.vgg.load_state_dict(vgg_weights)
 
@@ -115,9 +118,14 @@ if not args.resume:
     ssd_net.loc.apply(weights_init)
     ssd_net.conf.apply(weights_init)
 
-# optimizer = optim.SGD(net.parameters(), lr=args.lr,
-#                       momentum=args.momentum, weight_decay=args.weight_decay)
-optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+if args.no_argumentation:
+    data_transform = BaseTransform
+else:
+    data_transform = SSDAugmentation
+
+optimizer = optim.SGD(net.parameters(), lr=args.lr,
+                      momentum=args.momentum, weight_decay=args.weight_decay)
+# optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
 
 
@@ -128,7 +136,7 @@ def train():
     conf_loss = 0
     epoch = 0
     print('Loading Dataset...')
-    dataset = VOCDetection(data_root, train_sets, SSDAugmentation(
+    dataset = VOCDetection(data_root, train_sets, data_transform(
         ssd_dim, means), AnnotationTransform(dataset_name=args.dataset_name),
                            dataset_name=args.dataset_name)
 
@@ -216,7 +224,7 @@ def train():
                 update='append'
             )
             # hacky fencepost solution for 0th epoch plot
-            if iteration == 0:
+            if iteration % epoch_size == 0:
                 viz.line(
                     X=torch.zeros((1, 3)).cpu(),
                     Y=torch.Tensor([loc_loss, conf_loss,
@@ -224,9 +232,9 @@ def train():
                     win=epoch_lot,
                     update=True
                 )
-        if iteration % 5000 == 0:
+        if iteration % 10000 == 0:
             print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), args.save_folder+'ssd300_'+ args.dataset_name + '_' +
+            torch.save(ssd_net.state_dict(), args.save_folder+'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth')
     torch.save(ssd_net.state_dict(), args.save_folder + '' + args.version + '.pth')
 

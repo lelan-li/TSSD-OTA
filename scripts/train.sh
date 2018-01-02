@@ -2,5 +2,10 @@ pythonc3 ../train.py \
 --lr 0.001 \
 --visdom true \
 --send_images_to_visdom false \
---save_folder ../weights/VID2017/ \
---batch_size 32
+--save_folder ../weights/ssd300_VID2017_noarg/ \
+--step_list 200000 300000 \
+--batch_size 32 \
+--ssd_dim 300 \
+--resume ../weights/ssd300_VID2017_noarg/ssd300_VID2017_190000.pth \
+--start_iter 190000 \
+--no_argumentation

@@ -10,11 +10,11 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.autograd import Variable
-from data import VOCroot
-from data import VOC_CLASSES as labelmap
+from data import VOCroot, VIDroot
+# from data import VOC_CLASSES as labelmap
 import torch.utils.data as data
 
-from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES
+from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name
 from ssd import build_ssd
 
 import sys
@@ -25,6 +25,8 @@ import numpy as np
 import pickle
 import cv2
 
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
+
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
 else:
@@ -34,7 +36,7 @@ def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detection')
-parser.add_argument('--trained_model', default='weights/ssd300_mAP_77.43_v2.pth',
+parser.add_argument('--model_name', default='weights/ssd300_mAP_77.43_v2.pth',
                     type=str, help='Trained state_dict file path to open')
 parser.add_argument('--save_folder', default='eval/', type=str,
                     help='File path to save results')
@@ -45,6 +47,12 @@ parser.add_argument('--top_k', default=5, type=int,
 parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use cuda to train model')
 parser.add_argument('--voc_root', default=VOCroot, help='Location of VOC root directory')
+parser.add_argument('--dataset_name', default='VOC0712', help='Which dataset')
+parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
+parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
+parser.add_argument('--literation', default='50000', type=str,help='File path to save results')
+parser.add_argument('--model_dir', default='../weights', type=str,help='Path to save model')
+parser.add_argument('--detection', action='store_true', help='detection or not')
 
 args = parser.parse_args()
 
@@ -56,13 +64,27 @@ if args.cuda and torch.cuda.is_available():
 else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
-annopath = os.path.join(args.voc_root, 'VOC2007', 'Annotations', '%s.xml')
-imgpath = os.path.join(args.voc_root, 'VOC2007', 'JPEGImages', '%s.jpg')
-imgsetpath = os.path.join(args.voc_root, 'VOC2007', 'ImageSets', 'Main', '{:s}.txt')
-YEAR = '2007'
-devkit_path = VOCroot + 'VOC' + YEAR
+set_type = args.set_file_name.split('_')[0]
+
+if args.dataset_name == 'VOC0712':
+    annopath = os.path.join(VOCroot, 'VOC2007', 'Annotations', '%s.xml')
+    imgpath = os.path.join(VOCroot, 'VOC2007', 'JPEGImages', '%s.jpg')
+    imgsetpath = os.path.join(VOCroot, 'VOC2007', 'ImageSets', 'Main', '{:s}.txt')
+    YEAR = '2007'
+    devkit_path = VOCroot + 'VOC' + YEAR
+    labelmap = VOC_CLASSES
+elif args.dataset_name == 'VID2017':
+
+    annopath = os.path.join(VIDroot, 'Annotations', 'VID', set_type, '%s.xml')
+    imgpath = os.path.join(VIDroot, 'Data', 'VID', set_type, '%s.JPEG')
+    imgsetpath = os.path.join(VIDroot, 'ImageSets', 'VID', '{:s}.txt')
+    devkit_path = VIDroot[:-1]
+    labelmap = VID_CLASSES
+
 dataset_mean = (104, 117, 123)
-set_type = 'test'
+ssd_dim = args.ssd_dim
+pkl_dir = os.path.join(args.save_folder, args.dataset_name+ '_'+ args.model_name+ '_'+ args.literation)
+trained_model = os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
 
 class Timer(object):
     """A simple timer."""
@@ -96,9 +118,10 @@ def parse_rec(filename):
     for obj in tree.findall('object'):
         obj_struct = {}
         obj_struct['name'] = obj.find('name').text
-        obj_struct['pose'] = obj.find('pose').text
-        obj_struct['truncated'] = int(obj.find('truncated').text)
-        obj_struct['difficult'] = int(obj.find('difficult').text)
+        if args.dataset_name == 'VOC0712':
+            obj_struct['pose'] = obj.find('pose').text
+            obj_struct['truncated'] = int(obj.find('truncated').text)
+            obj_struct['difficult'] = int(obj.find('difficult').text)
         bbox = obj.find('bndbox')
         obj_struct['bbox'] = [int(bbox.find('xmin').text) - 1,
                               int(bbox.find('ymin').text) - 1,
@@ -159,10 +182,14 @@ def do_python_eval(output_dir='output', use_07=True):
     for i, cls in enumerate(labelmap):
         filename = get_voc_results_file_template(set_type, cls)
         rec, prec, ap = voc_eval(
-           filename, annopath, imgsetpath.format(set_type), cls, cachedir,
+           filename, annopath, imgsetpath.format(args.set_file_name), cls, cachedir,
            ovthresh=0.5, use_07_metric=use_07_metric)
         aps += [ap]
-        print('AP for {} = {:.4f}'.format(cls, ap))
+        rec = [rec] if isinstance(rec, float) else rec
+        prec = [prec] if isinstance(prec, float) else prec
+        # rec_top = rec[args.top_k-1] if len(rec) > args.top_k else rec[-1]
+        # prec_top = prec[args.top_k - 1] if len(prec) > args.top_k else prec[-1]
+        print('{} AP = {:.4f}, Rec = {:.4f}, Prec = {:.4f}'.format(VID_CLASSES_name[VID_CLASSES.index(cls)], ap, rec[-1], np.max(prec)))
         with open(os.path.join(output_dir, cls + '_pr.pkl'), 'wb') as f:
             pickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
     print('Mean AP = {:.4f}'.format(np.mean(aps)))
@@ -248,7 +275,13 @@ cachedir: Directory for caching the annotations
     cachefile = os.path.join(cachedir, 'annots.pkl')
     # read list of images
     with open(imagesetfile, 'r') as f:
-        lines = f.readlines()
+        if args.dataset_name == 'VID2017':
+            lines_tmp = f.readlines()
+            lines = []
+            for i in range(len(lines_tmp)):
+                lines.append(lines_tmp[i].split(' ')[0])
+        else:
+            lines = f.readlines()
     imagenames = [x.strip() for x in lines]
     if not os.path.isfile(cachefile):
         # load annots
@@ -263,49 +296,57 @@ cachedir: Directory for caching the annotations
         with open(cachefile, 'wb') as f:
             pickle.dump(recs, f)
     else:
-        # load
+        # from load cachefile load gt, e.g.
+        #{'ILSVRC2015_val_00004000/000010': [{'bbox': [241, 114, 451, 233], 'name': 'n02121808'},
+        #                                   {'bbox': [106, 59, 384, 245], 'name': 'n02484322'}],
+        #'ILSVRC2015_val_00000000/000000': [{'bbox': [416, 6, 605, 171], 'name': 'n01662784'}],
+        #'ILSVRC2015_val_00000001/000158': [{'bbox': [644, 137, 903, 384], 'name': 'n01662784'}]}
         with open(cachefile, 'rb') as f:
             recs = pickle.load(f)
 
     # extract gt objects for this class
     class_recs = {}
-    npos = 0
+    npos = 0 # the total number of gt objects in a class
     for imagename in imagenames:
         R = [obj for obj in recs[imagename] if obj['name'] == classname]
+        #e.g. R = [{'name': 'n02121808', 'bbox': [241, 114, 451, 233]}]
         bbox = np.array([x['bbox'] for x in R])
-        difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
-        det = [False] * len(R)
+        if args.dataset_name == 'VOC0712':
+            difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
+        else:
+            difficult = np.array([False for _ in R]).astype(np.bool)
+        det = [False] * len(R) # False : have not been detected
         npos = npos + sum(~difficult)
         class_recs[imagename] = {'bbox': bbox,
                                  'difficult': difficult,
                                  'det': det}
 
     # read dets
+    #e.g.: /home/sean/data/ILSVRC/results/det_val_n02834778.txt
     detfile = detpath.format(classname)
     with open(detfile, 'r') as f:
         lines = f.readlines()
     if any(lines) == 1:
-
         splitlines = [x.strip().split(' ') for x in lines]
         image_ids = [x[0] for x in splitlines]
         confidence = np.array([float(x[1]) for x in splitlines])
         BB = np.array([[float(z) for z in x[2:]] for x in splitlines])
 
-        # sort by confidence
+        # sort by confidence: greater->smaller
         sorted_ind = np.argsort(-confidence)
         sorted_scores = np.sort(-confidence)
         BB = BB[sorted_ind, :]
         image_ids = [image_ids[x] for x in sorted_ind]
 
         # go down dets and mark TPs and FPs
-        nd = len(image_ids)
+        nd = len(image_ids) # the total number of det objects in a class
         tp = np.zeros(nd)
         fp = np.zeros(nd)
-        for d in range(nd):
-            R = class_recs[image_ids[d]]
-            bb = BB[d, :].astype(float)
+        for d in range(nd): # each det boxes are compared with all
+            R = class_recs[image_ids[d]]  # gt
+            bb = BB[d, :].astype(float) # det
             ovmax = -np.inf
-            BBGT = R['bbox'].astype(float)
+            BBGT = R['bbox'].astype(float) # gt
             if BBGT.size > 0:
                 # compute overlaps
                 # intersection
@@ -334,7 +375,7 @@ cachedir: Directory for caching the annotations
                 fp[d] = 1.
 
         # compute precision recall
-        fp = np.cumsum(fp)
+        fp = np.cumsum(fp) # compute top k
         tp = np.cumsum(tp)
         rec = tp / float(npos)
         # avoid divide by zero in case the first detection matches a difficult
@@ -342,9 +383,10 @@ cachedir: Directory for caching the annotations
         prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
         ap = voc_ap(rec, prec, use_07_metric)
     else:
-        rec = -1.
-        prec = -1.
-        ap = -1.
+        # original latter all = -1.
+        rec = 0.
+        prec = 0.
+        ap = 0.
 
     return rec, prec, ap
 
@@ -361,12 +403,13 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
-    output_dir = get_output_dir('ssd300_120000', set_type)
+    output_dir = get_output_dir(pkl_dir, set_type)
     det_file = os.path.join(output_dir, 'detections.pkl')
 
     for i in range(num_images):
         im, gt, h, w = dataset.pull_item(i)
-
+        if len(gt) == 0:
+            continue
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()
@@ -390,8 +433,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             cls_dets = np.hstack((boxes.cpu().numpy(), scores[:, np.newaxis])) \
                 .astype(np.float32, copy=False)
             all_boxes[j][i] = cls_dets
-
-        print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
+        if i % (int(num_images/10)) == 0:
+            print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
 
     with open(det_file, 'wb') as f:
@@ -408,17 +451,27 @@ def evaluate_detections(box_list, output_dir, dataset):
 
 if __name__ == '__main__':
     # load net
-    num_classes = len(VOC_CLASSES) + 1 # +1 background
-    net = build_ssd('test', 300, num_classes) # initialize SSD
-    net.load_state_dict(torch.load(args.trained_model))
-    net.eval()
-    print('Finished loading model!')
-    # load data
-    dataset = VOCDetection(args.voc_root, [('2007', set_type)], BaseTransform(300, dataset_mean), AnnotationTransform())
-    if args.cuda:
-        net = net.cuda()
-        cudnn.benchmark = True
-    # evaluation
-    test_net(args.save_folder, net, args.cuda, dataset,
-             BaseTransform(net.size, dataset_mean), args.top_k, 300,
-             thresh=args.confidence_threshold)
+    if args.dataset_name == 'VOC0712':
+        num_classes = len(VOC_CLASSES) + 1 # +1 background
+        dataset = VOCDetection(VOCroot, [('2007', set_type)], BaseTransform(ssd_dim, dataset_mean),
+                               AnnotationTransform(dataset_name=args.dataset_name), dataset_name=args.dataset_name )
+    elif args.dataset_name == 'VID2017':
+        num_classes = len(VID_CLASSES) + 1 # +1 background
+        dataset = VOCDetection(VIDroot, set_type, BaseTransform(ssd_dim, dataset_mean),
+                               AnnotationTransform(dataset_name=args.dataset_name),
+                               dataset_name=args.dataset_name, phase=set_type, set_file_name=args.set_file_name)
+    if args.detection:
+        net = build_ssd('test', ssd_dim, num_classes) # initialize SSD
+        net.load_state_dict(torch.load(trained_model))
+        net.eval()
+        print('Finished loading model!')
+        # load data
+        if args.cuda:
+            net = net.cuda()
+            cudnn.benchmark = True
+        # evaluation
+        test_net(args.save_folder, net, args.cuda, dataset,
+                 BaseTransform(net.size, dataset_mean), args.top_k, ssd_dim,
+                 thresh=args.confidence_threshold)
+    else:
+        do_python_eval(get_output_dir(pkl_dir, set_type))

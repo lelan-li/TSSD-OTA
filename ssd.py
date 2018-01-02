@@ -45,6 +45,7 @@ class SSD(nn.Module):
         if phase == 'test':
             self.softmax = nn.Softmax()
             self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
+                                # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
     def forward(self, x):
         """Applies network layers and ops on input image(s) x.
@@ -89,9 +90,8 @@ class SSD(nn.Module):
 
         # apply multibox head to source layers
         for (x, l, c) in zip(sources, self.loc, self.conf):
-            loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+            loc.append(l(x).permute(0, 2, 3, 1).contiguous()) # [ith_multi_layer, batch, height, width, out_channel]
             conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
@@ -179,7 +179,7 @@ def multibox(vgg, extra_layers, cfg, num_classes):
 
 base = {
     '300': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
-            512, 512, 512],
+            512, 512, 512], # output channel
     '512': [],
 }
 extras = {
