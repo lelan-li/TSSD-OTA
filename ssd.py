@@ -117,6 +117,161 @@ class SSD(nn.Module):
         else:
             print('Sorry only .pth and .pkl files supported.')
 
+# https://www.jianshu.com/p/72124b007f7d
+class ConvLSTMCell(nn.Module):
+    """
+    Generate a convolutional LSTM cell
+    """
+
+    def __init__(self, input_size, hidden_size):
+        super(ConvLSTMCell, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.Gates = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, 3, padding=1)
+
+    def forward(self, input_, prev_state):
+
+        # get batch and spatial sizes
+        batch_size = input_.data.size()[0]
+        spatial_size = input_.data.size()[2:]
+
+        # generate empty prev_state, if None is provided
+        if prev_state is None:
+            state_size = [batch_size, self.hidden_size] + list(spatial_size)
+            prev_state = (
+                Variable(torch.zeros(state_size)),
+                Variable(torch.zeros(state_size))
+            )
+
+        prev_hidden, prev_cell = prev_state
+
+        # data size is [batch, channel, height, width]
+        stacked_inputs = torch.cat((input_, prev_hidden), 1)
+        gates = self.Gates(stacked_inputs)
+
+        # chunk across channel dimension
+        in_gate, remember_gate, out_gate, cell_gate = gates.chunk(4, 1)
+
+        # apply sigmoid non linearity
+        in_gate = F.sigmoid(in_gate)
+        remember_gate = F.sigmoid(remember_gate)
+        out_gate = F.sigmoid(out_gate)
+
+        # apply tanh non linearity
+        cell_gate = F.tanh(cell_gate)
+
+        # compute current cell and hidden state
+        cell = (remember_gate * prev_cell) + (in_gate * cell_gate)
+        hidden = out_gate * F.tanh(cell)
+
+        return hidden, cell
+
+class TSSD(nn.Module):
+
+    def __init__(self, phase, base, extras, head, num_classes, lstm='conf'):
+        super(TSSD, self).__init__()
+        self.phase = phase
+        self.num_classes = num_classes
+        # TODO: implement __call__ in PriorBox
+        self.priorbox = PriorBox(v2)
+        self.priors = Variable(self.priorbox.forward(), volatile=True)
+        self.size = 300
+
+        # SSD network
+        self.vgg = nn.ModuleList(base)
+        # Layer learns to scale the l2 normalized features from conv4_3
+        self.L2Norm = L2Norm(512, 20)
+        self.extras = nn.ModuleList(extras)
+        self.lstm = lstm
+        if self.lstm == 'both_conv_lstm':
+            self.loc_lstm = nn.ModuleList(head[0][::2])
+            self.conf_lstm = nn.ModuleList(head[1][0::2])
+            self.loc = nn.ModuleList(head[0][1::2])
+            self.conf = nn.ModuleList(head[1][1::2])
+        elif self.lstm == 'conf_conv_lstm':
+            self.conf_lstm = nn.ModuleList(head[1][0::2])
+            self.loc = nn.ModuleList(head[0])
+            self.conf = nn.ModuleList(head[1][1::2])
+        elif self.lstm == 'conf_linear_lstm':
+            self.loc = nn.ModuleList(head[0])
+            self.conf = nn.ModuleList(head[1])
+            # self.conf_lstm = nn.LSTMCell()
+        else:
+            raise ValueError("tssd mode [%s] not recognized." % self.lstm)
+
+        if phase == 'test':
+            self.softmax = nn.Softmax()
+            self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
+            # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
+
+    def forward(self, tx):
+
+        if self.lstm == 'both_conv_lstm':
+            loc_state = [None] * len(self.loc_lstm)
+        conf_state = [None] * len(self.conf_lstm)
+        seq_output = []
+        for time_step in range(tx.size(1)):
+            x = tx[:,time_step,:,:]
+            sources = list()
+            loc = list()
+            conf = list()
+
+            # apply vgg up to conv4_3 relu
+            for k in range(23):
+                x = self.vgg[k](x)
+
+            s = self.L2Norm(x)
+            sources.append(s)
+
+            # apply vgg up to fc7
+            for k in range(23, len(self.vgg)):
+                x = self.vgg[k](x)
+            sources.append(x)
+
+            # apply extra layers and cache source layer outputs
+            for k, v in enumerate(self.extras):
+                x = F.relu(v(x), inplace=True)
+                if k % 2 == 1:
+                    sources.append(x)
+
+            # apply multibox head to source layers
+            if self.lstm == 'both_conv_lstm':
+                for i, (x, l_lstm, c_lstm, l, c) in enumerate(zip(sources, self.loc_lstm, self.conf_lstm, self.loc, self.conf)):
+                    loc_state[i] = l_lstm(x, loc_state[i])
+                    loc.append(l(loc_state[i][0]).permute(0, 2, 3, 1).contiguous())
+                    conf_state[i] = c_lstm(x, conf_state[i])
+                    conf.append(c(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
+            elif self.lstm == 'conf_conv_lstm':
+                for i, (x, c_lstm, l, c) in enumerate(zip(sources, self.conf_lstm, self.loc, self.conf)):
+                    loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+                    conf_state[i] = c_lstm(x, conf_state[i])
+                    conf.append(c(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
+
+            loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+            conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+            if self.phase == "test":
+                output = self.detect(
+                    loc.view(loc.size(0), -1, 4),  # loc preds
+                    self.softmax(conf.view(-1, self.num_classes)),  # conf preds
+                    self.priors.type(type(x.data))  # default boxes
+                )
+            else:
+                output = (
+                    loc.view(loc.size(0), -1, 4),
+                    conf.view(conf.size(0), -1, self.num_classes),
+                    self.priors
+                )
+            seq_output.append(output)
+        return tuple(seq_output)
+
+    def load_weights(self, base_file):
+        other, ext = os.path.splitext(base_file)
+        if ext == '.pkl' or '.pth':
+            print('Loading weights into state dict...')
+            self.load_state_dict(torch.load(base_file, map_location=lambda storage, loc: storage))
+            print('Finished!')
+        else:
+            print('Sorry only .pth and .pkl files supported.')
 
 # This function is derived from torchvision VGG make_layers()
 # https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
@@ -159,21 +314,40 @@ def add_extras(cfg, i, batch_norm=False):
         in_channels = v
     return layers
 
-
-def multibox(vgg, extra_layers, cfg, num_classes):
+def multibox(vgg, extra_layers, cfg, num_classes, lstm=None):
     loc_layers = []
     conf_layers = []
     vgg_source = [24, -2]
     for k, v in enumerate(vgg_source):
-        loc_layers += [nn.Conv2d(vgg[v].out_channels,
-                                 cfg[k] * 4, kernel_size=3, padding=1)]
-        conf_layers += [nn.Conv2d(vgg[v].out_channels,
-                        cfg[k] * num_classes, kernel_size=3, padding=1)]
+        if lstm == 'both_conv_lstm':
+            loc_layers +=[ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels),nn.Conv2d(vgg[v].out_channels,
+                                     cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers +=[ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels),nn.Conv2d(vgg[v].out_channels,
+                            cfg[k] * num_classes, kernel_size=3, padding=1)]
+        elif lstm == 'conf_conv_lstm':
+            loc_layers += [ nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers += [ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels),
+                            nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
+        else:
+            loc_layers += [nn.Conv2d(vgg[v].out_channels,
+                                     cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(vgg[v].out_channels,
+                            cfg[k] * num_classes, kernel_size=3, padding=1)]
     for k, v in enumerate(extra_layers[1::2], 2):
-        loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
-                                 * 4, kernel_size=3, padding=1)]
-        conf_layers += [nn.Conv2d(v.out_channels, cfg[k]
-                                  * num_classes, kernel_size=3, padding=1)]
+        if lstm == 'both_conv_lstm':
+            loc_layers += [ConvLSTMCell(v.out_channels, v.out_channels),nn.Conv2d(v.out_channels, cfg[k]
+                                     * 4, kernel_size=3, padding=1)]
+            conf_layers += [ConvLSTMCell(v.out_channels, v.out_channels),nn.Conv2d(v.out_channels, cfg[k]
+                                      * num_classes, kernel_size=3, padding=1)]
+        elif lstm == 'conf_conv_lstm':
+            loc_layers += [nn.Conv2d(v.out_channels, cfg[k]* 4, kernel_size=3, padding=1)]
+            conf_layers += [ConvLSTMCell(v.out_channels, v.out_channels),
+                            nn.Conv2d(v.out_channels, cfg[k]* num_classes, kernel_size=3, padding=1)]
+        else:
+            loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
+                                     * 4, kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(v.out_channels, cfg[k]
+                                      * num_classes, kernel_size=3, padding=1)]
     return vgg, extra_layers, (loc_layers, conf_layers)
 
 
@@ -192,14 +366,20 @@ mbox = {
 }
 
 
-def build_ssd(phase, size=300, num_classes=21):
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd'):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
     if size != 300:
         print("Error: Sorry only SSD300 is supported currently!")
         return
-
-    return SSD(phase, *multibox(vgg(base[str(size)], 3),
+    if tssd == 'ssd':
+        return SSD(phase, *multibox(vgg(base[str(size)], 3),
+                                    add_extras(extras[str(size)], 1024),
+                                    mbox[str(size)], num_classes), num_classes)
+    else:
+        return TSSD(phase, *multibox(vgg(base[str(size)], 3),
                                 add_extras(extras[str(size)], 1024),
-                                mbox[str(size)], num_classes), num_classes)
+                                mbox[str(size)], num_classes, lstm=tssd), num_classes, lstm=tssd)
+
+

@@ -415,3 +415,64 @@ class SSDAugmentation(object):
 
     def __call__(self, img, boxes, labels):
         return self.augment(img, boxes, labels)
+
+class seqSSDAugmentation(object):
+    def __init__(self, size=300, mean=(104, 117, 123)):
+        self.mean = mean
+        self.size = size
+        self.pre_augment = Compose([
+            ConvertFromInts(),
+            ToAbsoluteCoords(),
+            PhotometricDistort(),
+            #Expand(self.mean),
+            #RandomSampleCrop(),
+            # RandomMirror(),
+            # ToPercentCoords(),
+            # Resize(self.size),
+            # SubtractMeans(self.mean)
+        ])
+        self.post_augment = Compose([
+            # ConvertFromInts(),
+            # ToAbsoluteCoords(),
+            # PhotometricDistort(),
+            # Expand(self.mean),
+            # RandomSampleCrop(),
+            # RandomMirror(),
+            ToPercentCoords(),
+            Resize(self.size),
+            SubtractMeans(self.mean)
+        ])
+
+    def mirror(self, image, boxes, labels):
+        _, width, _ = image.shape
+        image = image[:, ::-1]
+        boxes = boxes.copy()
+        boxes[:, 0::2] = width - boxes[:, 2::-2]
+        return image, boxes, labels
+
+    def expand(self, image, boxes, labels, ratio):
+        height, width, depth = image.shape
+        left = random.uniform(0, width * ratio - width)
+        top = random.uniform(0, height * ratio - height)
+
+        expand_image = np.zeros(
+            (int(height * ratio), int(width * ratio), depth),
+            dtype=image.dtype)
+        expand_image[:, :, :] = self.mean
+        expand_image[int(top):int(top + height),
+        int(left):int(left + width)] = image
+        image = expand_image
+
+        boxes = boxes.copy()
+        boxes[:, :2] += (int(left), int(top))
+        boxes[:, 2:] += (int(left), int(top))
+
+        return image, boxes, labels
+
+    def __call__(self, img, boxes, labels, mirror=False, expand=0):
+        img, boxes, labels = self.pre_augment(img, boxes, labels)
+        if expand:
+            img, boxes, labels = self.expand(img, boxes, labels, ratio=expand)
+        if mirror:
+            img, boxes, labels = self.mirror(img, boxes, labels)
+        return self.post_augment(img, boxes, labels)

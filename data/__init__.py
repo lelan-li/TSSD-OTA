@@ -1,4 +1,4 @@
-from .voc0712 import VOCDetection, AnnotationTransform, detection_collate, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name
+from .voc0712 import VOCDetection, AnnotationTransform, detection_collate, seq_detection_collate, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name
 from .config import *
 import cv2
 import numpy as np

@@ -116,7 +116,7 @@ class AnnotationTransform(object):
         if (self.dataset_name == 'VOC0712'):
             self.class_to_ind = class_to_ind or dict(
                zip(VOC_CLASSES, range(len(VOC_CLASSES))))
-        elif (self.dataset_name == 'VID2017'):
+        elif (self.dataset_name == 'VID2017' or 'seqVID2017'):
             self.class_to_ind = class_to_ind or dict(
                 zip(VID_CLASSES, range(len(VID_CLASSES))))
         self.keep_difficult = keep_difficult
@@ -172,13 +172,15 @@ class VOCDetection(data.Dataset):
     """
 
     def __init__(self, root, image_sets, transform=None, target_transform=None,
-                 dataset_name='VOC0712', phase='train', set_file_name='train'):
+                 dataset_name='VOC0712', set_file_name='train', seq_len=8):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
         self.target_transform = target_transform
         self.name = dataset_name
         self.ids = list()
+        self.video_size = list()
+        self.seq_len = seq_len
         if self.name =='VOC0712':
             self._annopath = os.path.join('%s', 'Annotations', '%s.xml')
             self._imgpath = os.path.join('%s', 'JPEGImages', '%s.jpg')
@@ -186,28 +188,91 @@ class VOCDetection(data.Dataset):
                 rootpath = os.path.join(self.root, 'VOC' + year)
                 for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
                     self.ids.append((rootpath, line.strip()))
-        elif self.name == 'VID2017':
-            self._annopath = os.path.join('%s', 'Annotations', 'VID', phase, '%s.xml')
-            self._imgpath = os.path.join('%s', 'Data', 'VID', phase, '%s.JPEG')
+        elif self.name == 'VID2017' or 'seqVID2017':
+            self._annopath = os.path.join('%s', 'Annotations', 'VID', image_sets, '%s.xml')
+            self._imgpath = os.path.join('%s', 'Data', 'VID', image_sets, '%s.JPEG')
             rootpath = self.root[:-1]
             for line in open(os.path.join(rootpath, 'ImageSets', 'VID', set_file_name + '.txt')):
                 pos = line.split(' ')
                 self.ids.append((rootpath, pos[0]))
+                if self.name == 'seqVID2017':
+                    self.video_size.append(int(pos[1][:-1]))
 
 
     def __getitem__(self, index):
 
-        loop_none_gt = True
-        while loop_none_gt:
-            im, gt, h, w = self.pull_item(index)
-            if len(gt) > 0:
-                loop_none_gt = False
-            else:
-                index = index+1
-        return im, gt
+        if self.name == 'seqVID2017':
+            im_list, gt_list = self.pull_seqitem(index)
+            return im_list, gt_list
+        else:
+            loop_none_gt = True
+            while loop_none_gt:
+                im, gt, h, w = self.pull_item(index)
+                if len(gt) > 0:
+                    loop_none_gt = False
+                else:
+                    index = index+1
+            return im, gt
 
     def __len__(self):
         return len(self.ids)
+
+    def select_clip(self, video_id, video_size):
+        target_list = list()
+        img_list = list()
+
+        if video_size <= self.seq_len:
+            start_frame = 0
+            repeat = self.seq_len // video_size
+            residue = self.seq_len % video_size
+            for i in range(start_frame, video_size):
+                img_name = video_id[1]+'/'+str(i).zfill(6)
+                for _ in range(repeat):
+                    target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
+                    img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
+                if residue:
+                    target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
+                    img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
+                    residue -= 1
+
+        else:
+            start_frame = np.random.randint(0,video_size-self.seq_len)
+            for i in range(start_frame, start_frame+self.seq_len):
+                img_name = video_id[1]+'/'+str(i).zfill(6)
+                target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
+                img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
+        return target_list, img_list
+
+    def pull_seqitem(self, index):
+        video_id = self.ids[index]
+        video_size = self.video_size[index]
+
+
+        target_list, img_list = self.select_clip(video_id, video_size)
+
+        # transform annotation
+        for i, (target, img) in enumerate(zip(target_list, img_list)):
+            height, width, channels = img.shape
+            target_list[i] = self.target_transform(target, width, height)
+            if len(target_list[i]) == 0:
+                target_list[i] = target_list[i-1]
+                img_list[i] = img_list[i-1]
+
+        mirror = bool(np.random.randint(2))
+        expand = np.random.randint(2)
+        ratio = np.random.uniform(1, 4)
+        for i, (target, img) in enumerate(zip(target_list, img_list)):
+            target = np.array(target)
+            img, boxes, labels = self.transform(img, target[:, :4], target[:, 4],mirror=mirror, expand=expand*ratio)
+            # to rgb
+            img = img[:, :, (2, 1, 0)]
+            # img = img.transpose(2, 0, 1)
+            target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+            img_list[i] = img
+            target_list[i] = target
+
+        return torch.from_numpy(np.array(img_list)).permute(0, 3, 1, 2), target_list
+
 
     def pull_item(self, index):
         img_id = self.ids[index]
@@ -300,4 +365,26 @@ def detection_collate(batch):
     for sample in batch:
         imgs.append(sample[0])
         targets.append(torch.FloatTensor(sample[1]))
+    return torch.stack(imgs, 0), targets
+
+def seq_detection_collate(batch):
+    """Custom collate fn for dealing with batches of images that have a different
+    number of associated object annotations (bounding boxes).
+
+    Arguments:
+        batch: (tuple) A tuple of tensor images and lists of annotations
+
+    Return:
+        A tuple containing:
+            1) (tensor) batch of images stacked on their 0 dim
+            2) (list of tensors) annotations for a given image are stacked on 0 dim
+    """
+    targets = []
+    imgs = []
+    for sample in batch:
+        imgs.append(sample[0])
+        target = []
+        for anno in sample[1]:
+            target.append(torch.FloatTensor(anno))
+        targets.append(target)
     return torch.stack(imgs, 0), targets

@@ -1,7 +1,7 @@
 pythonc3 ../eval.py \
---model_dir ../weights/ssd300_VID2017_noarg \
+--model_dir ../weights/ssd300_VID2017 \
 --model_name ssd300 \
---literation 220000 \
+--literation 290000 \
 --save_folder ../eval \
 --confidence_threshold 0.01 \
 --top_k 5 \

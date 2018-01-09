@@ -459,7 +459,7 @@ if __name__ == '__main__':
         num_classes = len(VID_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VIDroot, set_type, BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name),
-                               dataset_name=args.dataset_name, phase=set_type, set_file_name=args.set_file_name)
+                               dataset_name=args.dataset_name, set_file_name=args.set_file_name)
     if args.detection:
         net = build_ssd('test', ssd_dim, num_classes) # initialize SSD
         net.load_state_dict(torch.load(trained_model))
