@@ -15,6 +15,7 @@ import torchvision.transforms as transforms
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 import numpy as np
+import random
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
 else:
@@ -234,13 +235,19 @@ class VOCDetection(data.Dataset):
                     target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
                     img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
                     residue -= 1
-
         else:
-            start_frame = np.random.randint(0,video_size-self.seq_len)
-            for i in range(start_frame, start_frame+self.seq_len):
-                img_name = video_id[1]+'/'+str(i).zfill(6)
-                target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
-                img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
+            skip = int(video_size / self.seq_len)
+            uniform_list = list(range(0, video_size, skip))
+            cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
+            select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
+                           uniform_list.index(x) not in cast_list]
+            img_name = [video_id[1]+'/'+str(i).zfill(6) for i in select_list]
+            target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \
+                                    [cv2.imread(self._imgpath % (video_id[0], img_name)) for img_name in img_name]
+            # for i in select_list:
+            #     # img_name = video_id[1]+'/'+str(i).zfill(6)
+            #     target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
+            #     img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
         return target_list, img_list
 
     def pull_seqitem(self, index):
@@ -302,6 +309,9 @@ class VOCDetection(data.Dataset):
 
         return torch.from_numpy(img).permute(2, 0, 1), target, height, width
         # return torch.from_numpy(img), target, height, width
+
+    def pull_img_id(self, index):
+        return self.ids[index]
 
     def pull_image(self, index):
         '''Returns the original image object at index in PIL form

@@ -24,7 +24,7 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes):
+    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -44,7 +44,7 @@ class SSD(nn.Module):
 
         if phase == 'test':
             self.softmax = nn.Softmax()
-            self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
+            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
                                 # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
     def forward(self, x):
@@ -168,7 +168,7 @@ class ConvLSTMCell(nn.Module):
 
 class TSSD(nn.Module):
 
-    def __init__(self, phase, base, extras, head, num_classes, lstm='conf'):
+    def __init__(self, phase, base, extras, head, num_classes, lstm='share_conv_lstm', top_k=200,thresh= 0.01,nms_thresh=0.45):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -188,81 +188,129 @@ class TSSD(nn.Module):
             self.conf_lstm = nn.ModuleList(head[1][0::2])
             self.loc = nn.ModuleList(head[0][1::2])
             self.conf = nn.ModuleList(head[1][1::2])
-        elif self.lstm == 'conf_conv_lstm':
+        elif self.lstm in ['conf_conv_lstm', 'share_conv_lstm']:
             self.conf_lstm = nn.ModuleList(head[1][0::2])
             self.loc = nn.ModuleList(head[0])
             self.conf = nn.ModuleList(head[1][1::2])
-        elif self.lstm == 'conf_linear_lstm':
-            self.loc = nn.ModuleList(head[0])
-            self.conf = nn.ModuleList(head[1])
-            # self.conf_lstm = nn.LSTMCell()
         else:
             raise ValueError("tssd mode [%s] not recognized." % self.lstm)
 
         if phase == 'test':
             self.softmax = nn.Softmax()
-            self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
+            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
             # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
-    def forward(self, tx):
+    def forward(self, tx, state=None):
+        if self.phase == "train":
+            if self.lstm == 'both_conv_lstm':
+                loc_state = [None] * len(self.loc_lstm)
+            conf_state = [None] * len(self.conf_lstm)
+            seq_output = []
+            for time_step in range(tx.size(1)):
+                x = tx[:,time_step,:,:]
+                sources = list()
+                loc = list()
+                conf = list()
 
-        if self.lstm == 'both_conv_lstm':
-            loc_state = [None] * len(self.loc_lstm)
-        conf_state = [None] * len(self.conf_lstm)
-        seq_output = []
-        for time_step in range(tx.size(1)):
-            x = tx[:,time_step,:,:]
+                # apply vgg up to conv4_3 relu
+                for k in range(23):
+                    x = self.vgg[k](x)
+
+                s = self.L2Norm(x)
+                sources.append(s)
+
+                # apply vgg up to fc7
+                for k in range(23, len(self.vgg)):
+                    x = self.vgg[k](x)
+                sources.append(x)
+
+                # apply extra layers and cache source layer outputs
+                for k, v in enumerate(self.extras):
+                    x = F.relu(v(x), inplace=True)
+                    if k % 2 == 1:
+                        sources.append(x)
+
+                # apply multibox head to source layers
+                if self.lstm == 'both_conv_lstm':
+                    for i, (x, l_lstm, c_lstm, l, c) in enumerate(zip(sources, self.loc_lstm, self.conf_lstm, self.loc, self.conf)):
+                        loc_state[i] = l_lstm(x, loc_state[i])
+                        loc.append(l(loc_state[i][0]).permute(0, 2, 3, 1).contiguous())
+                        conf_state[i] = c_lstm(x, conf_state[i])
+                        conf.append(c(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
+                elif self.lstm in ['conf_conv_lstm', 'share_conv_lstm']:
+                    for i, (x, c_lstm, l, c) in enumerate(zip(sources, self.conf_lstm, self.loc, self.conf)):
+                        conf_state[i] = c_lstm(x, conf_state[i])
+                        if self.lstm == 'share_conv_lstm':
+                            loc.append(l(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
+                        else:
+                            loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+                        conf.append(c(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
+
+                loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+                conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+                output = (
+                    loc.view(loc.size(0), -1, 4),
+                    conf.view(conf.size(0), -1, self.num_classes),
+                    self.priors
+                )
+                seq_output.append(output)
+            return tuple(seq_output)
+        elif self.phase == 'test':
+            if self.lstm == 'both_conv_lstm':
+                loc_state, conf_state = state
+            else:
+                conf_state  = state
+
             sources = list()
             loc = list()
             conf = list()
 
             # apply vgg up to conv4_3 relu
             for k in range(23):
-                x = self.vgg[k](x)
+                tx = self.vgg[k](tx)
 
-            s = self.L2Norm(x)
+            s = self.L2Norm(tx)
             sources.append(s)
 
             # apply vgg up to fc7
             for k in range(23, len(self.vgg)):
-                x = self.vgg[k](x)
-            sources.append(x)
+                tx = self.vgg[k](tx)
+            sources.append(tx)
 
             # apply extra layers and cache source layer outputs
             for k, v in enumerate(self.extras):
-                x = F.relu(v(x), inplace=True)
+                tx = F.relu(v(tx), inplace=True)
                 if k % 2 == 1:
-                    sources.append(x)
+                    sources.append(tx)
 
             # apply multibox head to source layers
             if self.lstm == 'both_conv_lstm':
-                for i, (x, l_lstm, c_lstm, l, c) in enumerate(zip(sources, self.loc_lstm, self.conf_lstm, self.loc, self.conf)):
+                for i, (x, l_lstm, c_lstm, l, c) in enumerate(
+                        zip(sources, self.loc_lstm, self.conf_lstm, self.loc, self.conf)):
                     loc_state[i] = l_lstm(x, loc_state[i])
                     loc.append(l(loc_state[i][0]).permute(0, 2, 3, 1).contiguous())
                     conf_state[i] = c_lstm(x, conf_state[i])
                     conf.append(c(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
-            elif self.lstm == 'conf_conv_lstm':
+            elif self.lstm in ['conf_conv_lstm', 'share_conv_lstm']:
                 for i, (x, c_lstm, l, c) in enumerate(zip(sources, self.conf_lstm, self.loc, self.conf)):
-                    loc.append(l(x).permute(0, 2, 3, 1).contiguous())
                     conf_state[i] = c_lstm(x, conf_state[i])
+                    if self.lstm == 'share_conv_lstm':
+                        loc.append(l(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
+                    else:
+                        loc.append(l(x).permute(0, 2, 3, 1).contiguous())
                     conf.append(c(conf_state[i][0]).permute(0, 2, 3, 1).contiguous())
 
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
-            if self.phase == "test":
-                output = self.detect(
-                    loc.view(loc.size(0), -1, 4),  # loc preds
-                    self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                    self.priors.type(type(x.data))  # default boxes
-                )
-            else:
-                output = (
-                    loc.view(loc.size(0), -1, 4),
-                    conf.view(conf.size(0), -1, self.num_classes),
-                    self.priors
-                )
-            seq_output.append(output)
-        return tuple(seq_output)
+
+            output = self.detect(
+                loc.view(loc.size(0), -1, 4),  # loc preds
+                self.softmax(conf.view(-1, self.num_classes)),  # conf preds
+                self.priors.type(type(tx.data))  # default boxes
+            )
+            state = (loc_state, conf_state) if self.lstm == 'both_conv_lstm' else conf_state
+            return output, state
+
 
     def load_weights(self, base_file):
         other, ext = os.path.splitext(base_file)
@@ -324,7 +372,7 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None):
                                      cfg[k] * 4, kernel_size=3, padding=1)]
             conf_layers +=[ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels),nn.Conv2d(vgg[v].out_channels,
                             cfg[k] * num_classes, kernel_size=3, padding=1)]
-        elif lstm == 'conf_conv_lstm':
+        elif lstm in ['conf_conv_lstm', 'share_conv_lstm']:
             loc_layers += [ nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
             conf_layers += [ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels),
                             nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
@@ -339,7 +387,7 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None):
                                      * 4, kernel_size=3, padding=1)]
             conf_layers += [ConvLSTMCell(v.out_channels, v.out_channels),nn.Conv2d(v.out_channels, cfg[k]
                                       * num_classes, kernel_size=3, padding=1)]
-        elif lstm == 'conf_conv_lstm':
+        elif lstm in ['conf_conv_lstm', 'share_conv_lstm']:
             loc_layers += [nn.Conv2d(v.out_channels, cfg[k]* 4, kernel_size=3, padding=1)]
             conf_layers += [ConvLSTMCell(v.out_channels, v.out_channels),
                             nn.Conv2d(v.out_channels, cfg[k]* num_classes, kernel_size=3, padding=1)]
@@ -366,7 +414,7 @@ mbox = {
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd'):
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, nms_thresh=0.45):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -376,10 +424,12 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd'):
     if tssd == 'ssd':
         return SSD(phase, *multibox(vgg(base[str(size)], 3),
                                     add_extras(extras[str(size)], 1024),
-                                    mbox[str(size)], num_classes), num_classes)
+                                    mbox[str(size)], num_classes), num_classes,
+                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3),
                                 add_extras(extras[str(size)], 1024),
-                                mbox[str(size)], num_classes, lstm=tssd), num_classes, lstm=tssd)
+                                mbox[str(size)], num_classes, lstm=tssd), num_classes, lstm=tssd,
+                    top_k=top_k, thresh=thresh, nms_thresh=nms_thresh)
 
 

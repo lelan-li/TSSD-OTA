@@ -42,17 +42,19 @@ parser.add_argument('--save_folder', default='eval/', type=str,
                     help='File path to save results')
 parser.add_argument('--confidence_threshold', default=0.01, type=float,
                     help='Detection confidence threshold')
-parser.add_argument('--top_k', default=5, type=int,
+parser.add_argument('--nms_threshold', default=0.45, type=float,
+                    help=' nms threshold')
+parser.add_argument('--top_k', default=200, type=int,
                     help='Further restrict the number of predictions to parse')
 parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use cuda to train model')
-parser.add_argument('--voc_root', default=VOCroot, help='Location of VOC root directory')
 parser.add_argument('--dataset_name', default='VOC0712', help='Which dataset')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
 parser.add_argument('--literation', default='50000', type=str,help='File path to save results')
 parser.add_argument('--model_dir', default='../weights', type=str,help='Path to save model')
-parser.add_argument('--detection', action='store_true', help='detection or not')
+parser.add_argument('--detection', default='no', type=str2bool, help='detection or not')
+parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 
 args = parser.parse_args()
 
@@ -73,8 +75,7 @@ if args.dataset_name == 'VOC0712':
     YEAR = '2007'
     devkit_path = VOCroot + 'VOC' + YEAR
     labelmap = VOC_CLASSES
-elif args.dataset_name == 'VID2017':
-
+elif args.dataset_name == 'VID2017' or 'seqVID2017':
     annopath = os.path.join(VIDroot, 'Annotations', 'VID', set_type, '%s.xml')
     imgpath = os.path.join(VIDroot, 'Data', 'VID', set_type, '%s.JPEG')
     imgsetpath = os.path.join(VIDroot, 'ImageSets', 'VID', '{:s}.txt')
@@ -392,7 +393,7 @@ cachedir: Directory for caching the annotations
 
 
 def test_net(save_folder, net, cuda, dataset, transform, top_k,
-             im_size=300, thresh=0.05):
+             im_size=300, thresh=0.05, tssd='ssd'):
     """Test a Fast R-CNN network on an image database."""
     num_images = len(dataset)
     # all detections are collected into:
@@ -405,16 +406,37 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     _t = {'im_detect': Timer(), 'misc': Timer()}
     output_dir = get_output_dir(pkl_dir, set_type)
     det_file = os.path.join(output_dir, 'detections.pkl')
-
+    if tssd == 'both_conv_lstm':
+        state = ([None] * 6, [None] * 6)
+    elif tssd == 'conf_conv_lstm':
+        state = [None] * 6
+    else:
+        state = None
+    pre_video_name = None
     for i in range(num_images):
         im, gt, h, w = dataset.pull_item(i)
         if len(gt) == 0:
             continue
+        img_id = dataset.pull_img_id(i)
+        video_name = img_id[1].split('/')[0]
+        if video_name != pre_video_name:
+            if tssd == 'both_conv_lstm':
+                state = ([None] * 6, [None] * 6)
+            elif tssd == 'conf_conv_lstm':
+                state = [None] * 6
+            else:
+                state = None
+            pre_video_name = video_name
+
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()
         _t['im_detect'].tic()
-        detections = net(x).data
+        if tssd == 'ssd':
+            detections = net(x).data
+        else:
+            detections, state = net(x, state=state)
+            detections = detections.data
         detect_time = _t['im_detect'].toc(average=False)
 
         # skip j = 0, because it's the background class
@@ -455,13 +477,16 @@ if __name__ == '__main__':
         num_classes = len(VOC_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VOCroot, [('2007', set_type)], BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name), dataset_name=args.dataset_name )
-    elif args.dataset_name == 'VID2017':
+    elif args.dataset_name == 'VID2017' or 'seqVID2017':
         num_classes = len(VID_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VIDroot, set_type, BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name),
                                dataset_name=args.dataset_name, set_file_name=args.set_file_name)
     if args.detection:
-        net = build_ssd('test', ssd_dim, num_classes) # initialize SSD
+        net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
+                        top_k=args.top_k,
+                        thresh=args.confidence_threshold,
+                        nms_thresh=args.nms_threshold)
         net.load_state_dict(torch.load(trained_model))
         net.eval()
         print('Finished loading model!')
@@ -472,6 +497,6 @@ if __name__ == '__main__':
         # evaluation
         test_net(args.save_folder, net, args.cuda, dataset,
                  BaseTransform(net.size, dataset_mean), args.top_k, ssd_dim,
-                 thresh=args.confidence_threshold)
+                 thresh=args.confidence_threshold, tssd=args.tssd)
     else:
         do_python_eval(get_output_dir(pkl_dir, set_type))

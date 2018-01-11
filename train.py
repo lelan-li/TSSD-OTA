@@ -24,6 +24,7 @@ parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Ja
 parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint')
 parser.add_argument('--resume_from_ssd', default='./weights/ssd300_VID2017/ssd300_VID2017_290000.pth', type=str, help='Resume vgg and extras from ssd checkpoint')
+parser.add_argument('--freeze', default=False, type=str2bool, help='Freeze')
 parser.add_argument('--num_workers', default=2, type=int, help='Number of workers used in dataloading')
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
 parser.add_argument('--start_iter', default=0, type=int, help='Begin counting iterations starting from this value (should be used with resume)')
@@ -44,6 +45,7 @@ parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='seqssd', type=str, help='how to transform data')
 parser.add_argument('--tssd',  default='conf_conv_lstm', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=16, type=int, help='Batch size for training')
+parser.add_argument('--set_file_name',  default='train', type=str, help='train set name')
 
 args = parser.parse_args()
 
@@ -75,20 +77,20 @@ else:
     num_classes = len(VID_CLASSES) + 1
     data_root = VIDroot
 
-set_filename = 'train_video_remove_no_object' if args.dataset_name=='seqVID2017' else'train'
+set_filename = args.set_file_name
 collate_fn = seq_detection_collate if args.dataset_name=='seqVID2017' else detection_collate
 
 ssd_dim = args.ssd_dim  # only support 300 now
-means = (128, 128, 128)
+means = (104, 117, 123)
 
 batch_size = args.batch_size
 # accum_batch_size = 32
 # iter_size = accum_batch_size / batch_size
-weight_decay = 0.0005
+weight_decay = args.weight_decay
 stepvalues = args.step_list
 max_iter = args.step_list[-1]
 gamma = 0.1
-momentum = 0.9
+momentum = args.momentum
 
 if args.visdom:
     import visdom
@@ -107,6 +109,8 @@ if args.resume_from_ssd:
     ssd_weights = torch.load(args.resume_from_ssd)
     ssd_vgg_weights = OrderedDict()
     ssd_extras_weights = OrderedDict()
+    ssd_loc_weights = OrderedDict()
+    ssd_conf_weights = OrderedDict()
     for key, weight in ssd_weights.items():
         key_split = key.split('.')
         subnet_name = key_split[0]
@@ -114,8 +118,20 @@ if args.resume_from_ssd:
             ssd_vgg_weights[key_split[1] + '.' + key_split[2]] = weight
         elif subnet_name == 'extras':
             ssd_extras_weights[key_split[1] + '.' + key_split[2]] = weight
+        elif subnet_name == 'loc':
+            ssd_loc_weights[key_split[1] + '.' + key_split[2]] = weight
+        elif subnet_name == 'conf':
+            ssd_conf_weights[key_split[1] + '.' + key_split[2]] = weight
     ssd_net.vgg.load_state_dict(ssd_vgg_weights)
     ssd_net.extras.load_state_dict(ssd_extras_weights)
+    ssd_net.loc.load_state_dict(ssd_loc_weights)
+    ssd_net.conf.load_state_dict(ssd_conf_weights)
+    if args.freeze:
+        freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.loc, ssd_net.conf]
+        for freeze_net in freeze_nets:
+            for param in freeze_net.parameters():
+                param.requires_grad = False
+
 elif args.resume:
     print('Resuming training, loading {}...'.format(args.resume))
     ssd_net.load_weights(args.resume)
@@ -138,19 +154,20 @@ def weights_init(m):
 
 if args.resume_from_ssd:
     print('Initializing Multibox weights...')
-    ssd_net.loc.apply(weights_init)
-    ssd_net.conf.apply(weights_init)
-    if args.tssd == 'both_conv_lstm' or 'conf_conv_lstm':
+    # ssd_net.loc.apply(weights_init)
+    # ssd_net.conf.apply(weights_init)
+    if args.tssd in ['both_conv_lstm', 'conf_conv_lstm', 'share_conv_lstm']:
         if args.tssd == 'both_conv_lstm':
             ssd_net.loc_lstm.apply(weights_init)
         ssd_net.conf_lstm.apply(weights_init)
+
 elif not args.resume:
     print('Initializing weights...')
     # initialize newly added layers' weights with xavier method
     ssd_net.extras.apply(weights_init)
     ssd_net.loc.apply(weights_init)
     ssd_net.conf.apply(weights_init)
-    if args.tssd == 'both_conv_lstm' or 'conf_conv_lstm':
+    if args.tssd in ['both_conv_lstm', 'conf_conv_lstm', 'share_conv_lstm']:
         if args.tssd == 'both_conv_lstm':
             ssd_net.loc_lstm.apply(weights_init)
         ssd_net.conf_lstm.apply(weights_init)
@@ -164,7 +181,11 @@ elif args.augm_type == 'seqssd':
 else:
     data_transform = BaseTransform
 
-optimizer = optim.SGD(net.parameters(), lr=args.lr,
+if args.freeze:
+    optimizer = optim.SGD(net.module.conf_lstm.parameters(), lr=args.lr,
+                          momentum=args.momentum, weight_decay=args.weight_decay)
+else:
+    optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 # optimizer = optim.RMSprop(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 # optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -287,7 +308,7 @@ def train():
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), args.save_folder+'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth')
-    torch.save(ssd_net.state_dict(), args.save_folder + '' + args.version + '.pth')
+    torch.save(ssd_net.state_dict(), args.save_folder+'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '.pth')
 
 
 def adjust_learning_rate(optimizer, gamma, step):
