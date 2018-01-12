@@ -244,10 +244,7 @@ class VOCDetection(data.Dataset):
             img_name = [video_id[1]+'/'+str(i).zfill(6) for i in select_list]
             target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \
                                     [cv2.imread(self._imgpath % (video_id[0], img_name)) for img_name in img_name]
-            # for i in select_list:
-            #     # img_name = video_id[1]+'/'+str(i).zfill(6)
-            #     target_list.append(ET.parse(self._annopath % (video_id[0], img_name)).getroot())
-            #     img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
+
         return target_list, img_list
 
     def pull_seqitem(self, index):

@@ -43,7 +43,7 @@ parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='s
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='seqssd', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='conf_conv_lstm', type=str, help='ssd or tssd')
+parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=16, type=int, help='Batch size for training')
 parser.add_argument('--set_file_name',  default='train', type=str, help='train set name')
 
@@ -156,20 +156,15 @@ if args.resume_from_ssd:
     print('Initializing Multibox weights...')
     # ssd_net.loc.apply(weights_init)
     # ssd_net.conf.apply(weights_init)
-    if args.tssd in ['both_conv_lstm', 'conf_conv_lstm', 'share_conv_lstm']:
-        if args.tssd == 'both_conv_lstm':
-            ssd_net.loc_lstm.apply(weights_init)
-        ssd_net.conf_lstm.apply(weights_init)
-
+    if args.tssd in ['lstm']:
+        ssd_net.lstm.apply(weights_init)
 elif not args.resume:
     print('Initializing weights...')
     # initialize newly added layers' weights with xavier method
     ssd_net.extras.apply(weights_init)
     ssd_net.loc.apply(weights_init)
     ssd_net.conf.apply(weights_init)
-    if args.tssd in ['both_conv_lstm', 'conf_conv_lstm', 'share_conv_lstm']:
-        if args.tssd == 'both_conv_lstm':
-            ssd_net.loc_lstm.apply(weights_init)
+    if args.tssd in ['lstm']:
         ssd_net.conf_lstm.apply(weights_init)
 
 if args.augm_type == 'ssd':
@@ -181,16 +176,10 @@ elif args.augm_type == 'seqssd':
 else:
     data_transform = BaseTransform
 
-if args.freeze:
-    optimizer = optim.SGD(net.module.conf_lstm.parameters(), lr=args.lr,
-                          momentum=args.momentum, weight_decay=args.weight_decay)
-else:
-    optimizer = optim.SGD(net.parameters(), lr=args.lr,
+optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=args.momentum, weight_decay=args.weight_decay)
 # optimizer = optim.RMSprop(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 # optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-# criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
-
 
 def train():
     net.train()
@@ -295,15 +284,6 @@ def train():
                 win=lot,
                 update='append'
             )
-            # hacky fencepost solution for 0th epoch plot
-            if iteration % epoch_size == 0:
-                viz.line(
-                    X=torch.zeros((1, 3)).cpu(),
-                    Y=torch.Tensor([loc_loss, conf_loss,
-                        loc_loss + conf_loss]).unsqueeze(0).cpu(),
-                    win=epoch_lot,
-                    update=True
-                )
         if iteration % 10000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), args.save_folder+'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
