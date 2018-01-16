@@ -122,7 +122,7 @@ class AnnotationTransform(object):
                 zip(VID_CLASSES, range(len(VID_CLASSES))))
         self.keep_difficult = keep_difficult
 
-    def __call__(self, target, width, height):
+    def __call__(self, target, width, height, img_id=None):
         """
         Arguments:
             target (annotation) : the target annotation to be made usable
@@ -137,8 +137,9 @@ class AnnotationTransform(object):
                 if not self.keep_difficult and difficult:
                     continue
             name = obj.find('name').text.lower().strip()
+            if name not in VID_CLASSES:
+                continue
             bbox = obj.find('bndbox')
-
             pts = ['xmin', 'ymin', 'xmax', 'ymax']
             bndbox = []
             for i, pt in enumerate(pts):
@@ -189,13 +190,13 @@ class VOCDetection(data.Dataset):
                 rootpath = os.path.join(self.root, 'VOC' + year)
                 for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
                     self.ids.append((rootpath, line.strip()))
-        elif self.name == 'VID2017' or 'seqVID2017':
+        elif self.name in ['VID2017', 'seqVID2017', 'VIDDET']:
             self._annopath = os.path.join('%s', 'Annotations', 'VID', image_sets, '%s.xml')
             self._imgpath = os.path.join('%s', 'Data', 'VID', image_sets, '%s.JPEG')
             rootpath = self.root[:-1]
             for line in open(os.path.join(rootpath, 'ImageSets', 'VID', set_file_name + '.txt')):
                 pos = line.split(' ')
-                self.ids.append((rootpath, pos[0]))
+                self.ids.append((rootpath, pos[0][:-1])) if len(pos)==1 else self.ids.append((rootpath, pos[0]))
                 if self.name == 'seqVID2017':
                     self.video_size.append(int(pos[1][:-1]))
 
@@ -251,7 +252,6 @@ class VOCDetection(data.Dataset):
         video_id = self.ids[index]
         video_size = self.video_size[index]
 
-
         target_list, img_list = self.select_clip(video_id, video_size)
 
         # transform annotation
@@ -286,7 +286,7 @@ class VOCDetection(data.Dataset):
         height, width, channels = img.shape
 
         if self.target_transform is not None:
-            target = self.target_transform(target, width, height)
+            target = self.target_transform(target, width, height, img_id)
             if len(target) == 0:
                 return img, target, height, width
             # box = target[0]

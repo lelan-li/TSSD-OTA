@@ -21,7 +21,6 @@ import cv2
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detection')
 parser.add_argument('--model_name', default='ssd300',
@@ -39,8 +38,12 @@ parser.add_argument('--literation', default='2900000', type=str,help='File path 
 parser.add_argument('--model_dir', default='./weights/ssd300_VID2017', type=str,help='Path to save model')
 parser.add_argument('--video_name', default='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2017_val_00131000.mp4', type=str,help='Path to video')
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
+parser.add_argument('--gpu_id',  default='1', type=str, help='gpu_id')
+
 
 args = parser.parse_args()
+
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
 class Timer(object):
     """A simple timer."""
@@ -90,7 +93,7 @@ def test_net(net, im, w, h, state=None, thresh=0.5, tim=None):
         detections = net(x).data
     else:
         tim.tic()
-        detections, state = net(x, state=state)
+        detections, state = net(x, state)
         detections = detections.data
         t_diff = tim.toc(average=True)
         print(np.around(t_diff, decimals=4))
@@ -141,12 +144,7 @@ if __name__ == '__main__':
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
-    if args.tssd == 'both_conv_lstm':
-        state = ([None]*6, [None]*6)
-    elif args.tssd == 'conf_conv_lstm' or 'share_conv_lstm':
-        state = [None]*6
-    else:
-        state = None
+    state = [None]*6 if args.tssd in ['lstm'] else None
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:

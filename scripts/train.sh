@@ -1,4 +1,4 @@
-type='lstm'
+type='ssd'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../train.py \
@@ -6,13 +6,15 @@ then
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom false \
-    --save_folder ../weights/ssd300_VID2017_mean128/ \
-    --step_list 200000 300000 \
-    --batch_size 32 \
+    --save_folder '../weights/ssd300_VIDDET/' \
+    --step_list 150000 200000 250000 \
+    --batch_size 64 \
     --ssd_dim 300 \
     --gpu_ids '2,3' \
-    --dataset_name 'VID2017' \
+    --dataset_name 'VIDDET' \
+    --set_file_name 'train_VID_DET' \
     --augm_type 'ssd' \
+    --resume_from_ssd 'ssd' \
     --tssd 'ssd'
 elif [ $type = 'lstm' ]
 then
@@ -21,8 +23,8 @@ then
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom false \
-    --save_folder '../weights/tssd300_VID2017_b4_s16_SkipShare_preVggExtraLocConf/' \
-    --step_list 100000 140000 \
+    --save_folder '../weights/tssd300_VID2017_b4_s16_SkipShareReduce_TuneVggExtraLocConf/' \
+    --step_list 20000 80000 \
     --batch_size 4 \
     --seq_len 16 \
     --ssd_dim 300 \

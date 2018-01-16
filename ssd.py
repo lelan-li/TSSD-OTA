@@ -122,11 +122,12 @@ class ConvLSTMCell(nn.Module):
     Generate a convolutional LSTM cell
     """
 
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, phase='train'):
         super(ConvLSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.Gates = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, 3, padding=1)
+        self.phase = phase
 
     def forward(self, input_, prev_state):
 
@@ -138,8 +139,8 @@ class ConvLSTMCell(nn.Module):
         if prev_state is None:
             state_size = [batch_size, self.hidden_size] + list(spatial_size)
             prev_state = (
-                Variable(torch.zeros(state_size)),
-                Variable(torch.zeros(state_size))
+                Variable(torch.zeros(state_size), volatile=(False, True)[self.phase=='test']),
+                Variable(torch.zeros(state_size), volatile=(False, True)[self.phase=='test'])
             )
 
         prev_hidden, prev_cell = prev_state
@@ -183,8 +184,9 @@ class TSSD(nn.Module):
         self.extras = nn.ModuleList(extras)
         self.lstm_mode = lstm
 
+        self.reduce = nn.ModuleList(head[0][0::2])
         self.lstm = nn.ModuleList(head[1][0::2])
-        self.loc = nn.ModuleList(head[0])
+        self.loc = nn.ModuleList(head[0][1::2])
         self.conf = nn.ModuleList(head[1][1::2])
 
         if phase == 'test':
@@ -192,7 +194,7 @@ class TSSD(nn.Module):
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
             # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
-    def forward(self, tx, state=None):
+    def forward(self, tx, lstm_state=None):
         if self.phase == "train":
             lstm_state = [None] * len(self.lstm)
             seq_output = []
@@ -221,8 +223,28 @@ class TSSD(nn.Module):
                         sources.append(x)
 
                 # apply multibox head to source layers
-                for i, (x, lstm, l, c) in enumerate(zip(sources, self.lstm, self.loc, self.conf)):
-                    lstm_state[i] = lstm(x, lstm_state[i])
+                for i, (x, r, lstm, l, c) in enumerate(zip(sources, self.reduce, self.lstm, self.loc, self.conf)):
+                #     if time_step:
+                #         if i==0:
+                #             post_scale = torch.cuda.FloatTensor(lstm_state[i+1][0].data.size())
+                #             lstm_state[i+1][0].data.copy_(post_scale)
+                #             post_scale.resize_as_(lstm_state[i][0].data)
+                #             lstm_state[i][0].data = lstm_state[i][0].data *0.75 + post_scale*0.25
+                #         elif i==5:
+                #             pre_scale = torch.cuda.FloatTensor(lstm_state[i - 1][0].data.size())
+                #             lstm_state[i - 1][0].data.copy_(pre_scale)
+                #             pre_scale.resize_as_(lstm_state[i][0].data)
+                #             lstm_state[i][0].data  = lstm_state[i][0].data *0.75 + pre_scale*0.25
+                #         else:
+                #             post_scale = torch.cuda.FloatTensor(lstm_state[i + 1][0].data.size())
+                #             pre_scale = torch.cuda.FloatTensor(lstm_state[i - 1][0].data.size())
+                #             lstm_state[i + 1][0].data.copy_(post_scale)
+                #             lstm_state[i - 1][0].data.copy_(pre_scale)
+                #             post_scale.resize_as_(lstm_state[i][0].data)
+                #             pre_scale.resize_as_(lstm_state[i][0].data)
+                #             lstm_state[i][0].data  = lstm_state[i][0].data *0.5 + post_scale*0.25 \
+                #                                + pre_scale*0.25
+                    lstm_state[i] = lstm(r(x), lstm_state[i])
                     loc.append(l(lstm_state[i][0]).permute(0, 2, 3, 1).contiguous())
                     conf.append(c(lstm_state[i][0]).permute(0, 2, 3, 1).contiguous())
 
@@ -237,7 +259,7 @@ class TSSD(nn.Module):
             return tuple(seq_output)
         elif self.phase == 'test':
 
-            lstm_state  = state
+            # lstm_state  = state
 
             sources = list()
             loc = list()
@@ -262,8 +284,8 @@ class TSSD(nn.Module):
                     sources.append(tx)
 
             # apply multibox head to source layers
-            for i, (x, lstm, l, c) in enumerate(zip(sources, self.lstm, self.loc, self.conf)):
-                lstm_state[i] = lstm(x, lstm_state[i])
+            for i, (x, r, lstm, l, c) in enumerate(zip(sources, self.reduce, self.lstm, self.loc, self.conf)):
+                lstm_state[i] = lstm(r(x), lstm_state[i])
                 loc.append(l(lstm_state[i][0]).permute(0, 2, 3, 1).contiguous())
                 conf.append(c(lstm_state[i][0]).permute(0, 2, 3, 1).contiguous())
 
@@ -275,7 +297,6 @@ class TSSD(nn.Module):
                 self.softmax(conf.view(-1, self.num_classes)),  # conf preds
                 self.priors.type(type(tx.data))  # default boxes
             )
-
             return output, lstm_state
 
 
@@ -329,15 +350,17 @@ def add_extras(cfg, i, batch_norm=False):
         in_channels = v
     return layers
 
-def multibox(vgg, extra_layers, cfg, num_classes, lstm=None):
+def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
     loc_layers = []
     conf_layers = []
     vgg_source = [24, -2]
     for k, v in enumerate(vgg_source):
 
         if lstm in ['lstm']:
-            loc_layers += [ nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
-            conf_layers += [ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels),
+            loc_layers += [ nn.Conv2d(vgg[v].out_channels, int(vgg[v].out_channels/2), kernel_size=1),
+                            nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+            # loc_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers += [ConvLSTMCell(int(vgg[v].out_channels/2), vgg[v].out_channels, phase=phase),
                             nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
         else:
             loc_layers += [nn.Conv2d(vgg[v].out_channels,
@@ -347,8 +370,10 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None):
     for k, v in enumerate(extra_layers[1::2], 2):
 
         if lstm in ['lstm']:
-            loc_layers += [nn.Conv2d(v.out_channels, cfg[k]* 4, kernel_size=3, padding=1)]
-            conf_layers += [ConvLSTMCell(v.out_channels, v.out_channels),
+            loc_layers += [nn.Conv2d(v.out_channels, int(v.out_channels/2), kernel_size=1),
+                           nn.Conv2d(v.out_channels, cfg[k]* 4, kernel_size=3, padding=1)]
+            # loc_layers += [nn.Conv2d(v.out_channels, cfg[k]* 4, kernel_size=3, padding=1)]
+            conf_layers += [ConvLSTMCell(int(v.out_channels/2), v.out_channels, phase=phase),
                             nn.Conv2d(v.out_channels, cfg[k]* num_classes, kernel_size=3, padding=1)]
         else:
             loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
@@ -365,7 +390,6 @@ base = {
 }
 extras = {
     '300': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
-    '300_lstm': [256, 512, 128, 256, 128, 256, 128, 256],
     '512': [],
 }
 mbox = {
@@ -384,12 +408,10 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
     if tssd == 'ssd':
         return SSD(phase, *multibox(vgg(base[str(size)], 3),
                                     add_extras(extras[str(size)], 1024),
-                                    mbox[str(size)], num_classes), num_classes,
+                                    mbox[str(size)], num_classes, phase=phase), num_classes,
                    top_k=top_k,thresh= thresh,nms_thresh=nms_thresh)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3),
                                 add_extras(extras[str(size)], 1024),
-                                mbox[str(size)], num_classes, lstm=tssd), num_classes, lstm=tssd,
+                                mbox[str(size)], num_classes, lstm=tssd, phase=phase), num_classes, lstm=tssd,
                     top_k=top_k, thresh=thresh, nms_thresh=nms_thresh)
-
-

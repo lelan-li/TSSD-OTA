@@ -25,8 +25,6 @@ import numpy as np
 import pickle
 import cv2
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
-
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
 else:
@@ -36,9 +34,9 @@ def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detection')
-parser.add_argument('--model_name', default='weights/ssd300_mAP_77.43_v2.pth',
+parser.add_argument('--model_name', default='ssd300',
                     type=str, help='Trained state_dict file path to open')
-parser.add_argument('--save_folder', default='eval/', type=str,
+parser.add_argument('--save_folder', default='../eval', type=str,
                     help='File path to save results')
 parser.add_argument('--confidence_threshold', default=0.01, type=float,
                     help='Detection confidence threshold')
@@ -48,15 +46,19 @@ parser.add_argument('--top_k', default=200, type=int,
                     help='Further restrict the number of predictions to parse')
 parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use cuda to train model')
-parser.add_argument('--dataset_name', default='VOC0712', help='Which dataset')
+parser.add_argument('--dataset_name', default='VID2017', help='Which dataset')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
-parser.add_argument('--literation', default='50000', type=str,help='File path to save results')
-parser.add_argument('--model_dir', default='../weights', type=str,help='Path to save model')
+parser.add_argument('--literation', default='20000', type=str,help='File path to save results')
+parser.add_argument('--model_dir', default='../weights/tssd300_VID2017_b4_s16_SkipShare_preVggExtraLocConf', type=str,help='Path to save model')
 parser.add_argument('--detection', default='no', type=str2bool, help='detection or not')
-parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
+parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
+parser.add_argument('--gpu_id', default='2.3', type=str,help='gpu id')
+
 
 args = parser.parse_args()
+
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 
 if not os.path.exists(args.save_folder):
     os.mkdir(args.save_folder)
@@ -75,7 +77,7 @@ if args.dataset_name == 'VOC0712':
     YEAR = '2007'
     devkit_path = VOCroot + 'VOC' + YEAR
     labelmap = VOC_CLASSES
-elif args.dataset_name == 'VID2017' or 'seqVID2017':
+elif args.dataset_name == 'VID2017':
     annopath = os.path.join(VIDroot, 'Annotations', 'VID', set_type, '%s.xml')
     imgpath = os.path.join(VIDroot, 'Data', 'VID', set_type, '%s.JPEG')
     imgsetpath = os.path.join(VIDroot, 'ImageSets', 'VID', '{:s}.txt')
@@ -85,7 +87,9 @@ elif args.dataset_name == 'VID2017' or 'seqVID2017':
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
 pkl_dir = os.path.join(args.save_folder, args.dataset_name+ '_'+ args.model_name+ '_'+ args.literation)
-trained_model = os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
+trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth') \
+    if args.tssd in ['lstm'] else os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
+
 
 class Timer(object):
     """A simple timer."""
@@ -404,14 +408,9 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
-    output_dir = get_output_dir(pkl_dir, set_type)
+    output_dir = get_output_dir(pkl_dir, args.model_dir.split('/')[-1]+'_'+args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
-    if tssd == 'both_conv_lstm':
-        state = ([None] * 6, [None] * 6)
-    elif tssd == 'conf_conv_lstm':
-        state = [None] * 6
-    else:
-        state = None
+    state = [None] * 6 if tssd in ['lstm'] else None
     pre_video_name = None
     for i in range(num_images):
         im, gt, h, w = dataset.pull_item(i)
@@ -420,12 +419,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         img_id = dataset.pull_img_id(i)
         video_name = img_id[1].split('/')[0]
         if video_name != pre_video_name:
-            if tssd == 'both_conv_lstm':
-                state = ([None] * 6, [None] * 6)
-            elif tssd == 'conf_conv_lstm':
-                state = [None] * 6
-            else:
-                state = None
+            state = [None] * 6 if tssd in['lstm'] else None
             pre_video_name = video_name
 
         x = Variable(im.unsqueeze(0))
@@ -435,7 +429,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if tssd == 'ssd':
             detections = net(x).data
         else:
-            detections, state = net(x, state=state)
+            detections, state = net(x, state)
             detections = detections.data
         detect_time = _t['im_detect'].toc(average=False)
 
@@ -477,7 +471,7 @@ if __name__ == '__main__':
         num_classes = len(VOC_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VOCroot, [('2007', set_type)], BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name), dataset_name=args.dataset_name )
-    elif args.dataset_name == 'VID2017' or 'seqVID2017':
+    elif args.dataset_name == 'VID2017':
         num_classes = len(VID_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VIDroot, set_type, BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name),
@@ -489,7 +483,7 @@ if __name__ == '__main__':
                         nms_thresh=args.nms_threshold)
         net.load_state_dict(torch.load(trained_model))
         net.eval()
-        print('Finished loading model!')
+        print('Finished loading model!', args.model_dir, args.literation)
         # load data
         if args.cuda:
             net = net.cuda()

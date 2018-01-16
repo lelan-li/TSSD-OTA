@@ -1,14 +1,4 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.backends.cudnn as cudnn
-import torch.nn.init as init
-import argparse
-from torch.autograd import Variable
-import torch.utils.data as data
-from data import v2, v1, AnnotationTransform, BaseTransform, VOCDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, VOC_CLASSES, VID_CLASSES
-from utils.augmentations import SSDAugmentation, seqSSDAugmentation
-from layers.modules import MultiBoxLoss, seqMultiBoxLoss
 from ssd import build_ssd
 from collections import OrderedDict
 
