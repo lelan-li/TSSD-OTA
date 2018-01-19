@@ -262,12 +262,14 @@ class VOCDetection(data.Dataset):
                 target_list[i] = target_list[i-1]
                 img_list[i] = img_list[i-1]
 
-        mirror = bool(np.random.randint(2))
-        expand = np.random.randint(2)
+        # mirror = bool(np.random.randint(2))
+        # expand = np.random.randint(2)
         ratio = np.random.uniform(1, 4)
         for i, (target, img) in enumerate(zip(target_list, img_list)):
             target = np.array(target)
-            img, boxes, labels = self.transform(img, target[:, :4], target[:, 4],mirror=mirror, expand=expand*ratio)
+            # img, boxes, labels = self.transform(img, target[:, :4], target[:, 4],mirror=mirror, expand=expand*ratio)
+            img, boxes, labels = self.transform(img, target[:, :4], target[:, 4])
+
             # to rgb
             img = img[:, :, (2, 1, 0)]
             # img = img.transpose(2, 0, 1)

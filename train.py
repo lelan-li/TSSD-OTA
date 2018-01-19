@@ -126,7 +126,8 @@ if args.resume_from_ssd != 'ssd':
     ssd_net.loc.load_state_dict(ssd_loc_weights)
     ssd_net.conf.load_state_dict(ssd_conf_weights)
     if args.freeze:
-        freeze_nets = [ssd_net.vgg, ssd_net.extras]
+        freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.loc, ssd_net.conf]
+        # print('Freeze:', repr(freeze_nets))
         for freeze_net in freeze_nets:
             for param in freeze_net.parameters():
                 param.requires_grad = False
@@ -180,8 +181,8 @@ else:
 
 if args.tssd in ['lstm']:
     optimizer = optim.SGD([
-            {'params': net.module.conf.parameters()},
-            {'params': net.module.loc.parameters()},
+            # {'params': net.module.loc.parameters()},
+            # {'params': net.module.conf.parameters()},
             {'params': net.module.reduce.parameters()},
             {'params': net.module.lstm.parameters()}
             ], lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)

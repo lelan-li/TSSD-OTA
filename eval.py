@@ -86,8 +86,11 @@ elif args.dataset_name == 'VID2017':
 
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
-pkl_dir = os.path.join(args.save_folder, args.dataset_name+ '_'+ args.model_name+ '_'+ args.literation)
-trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth') \
+pkl_dir = os.path.join(args.save_folder, args.model_dir.split('/')[-1])
+if args.model_dir == '../weights/ssd300_VIDDET':
+    trained_model = os.path.join(args.model_dir, args.model_dir.split('/')[-1] +'_' + args.literation +'.pth')
+else:
+    trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth') \
     if args.tssd in ['lstm'] else os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
 
 
@@ -408,7 +411,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
-    output_dir = get_output_dir(pkl_dir, args.model_dir.split('/')[-1]+'_'+args.set_file_name)
+    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['lstm'] else None
     pre_video_name = None
