@@ -124,8 +124,14 @@ if __name__ == '__main__':
 
     mean = (104, 117, 123)
     ssd_dim = args.ssd_dim
-    trained_model = os.path.join(args.model_dir,
-                                 args.model_name + '_' + args.dataset_name + '_' + args.literation + '.pth')
+
+    if args.model_dir == '../weights/ssd300_VIDDET':
+        trained_model = os.path.join(args.model_dir, args.model_dir.split('/')[-1] + '_' + args.literation + '.pth')
+    else:
+        trained_model = os.path.join(args.model_dir,
+                                     args.model_name + '_' + 'seq' + args.dataset_name + '_' + args.literation + '.pth') \
+            if args.tssd in ['lstm'] else os.path.join(args.model_dir,
+                                                       args.model_name + '_' + args.dataset_name + '_' + args.literation + '.pth')
 
     print('loading model!')
     net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,

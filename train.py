@@ -23,7 +23,7 @@ parser.add_argument('--basenet', default='vgg16_reducedfc.pth', help='pretrained
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
 parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint')
-parser.add_argument('--resume_from_ssd', default='ssd', type=str, help='Resume vgg and extras from ssd checkpoint')
+parser.add_argument('--resume_from_ssd', default='./weights/ssd300_VIDDET/ssd300_VIDDET_90000.pth', type=str, help='Resume vgg and extras from ssd checkpoint')
 parser.add_argument('--freeze', default=False, type=str2bool, help='Freeze')
 parser.add_argument('--num_workers', default=2, type=int, help='Number of workers used in dataloading')
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
@@ -36,15 +36,15 @@ parser.add_argument('--gamma', default=0.1, type=float, help='Gamma update for S
 parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss at each iteration')
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
-parser.add_argument('--save_folder', default='weights/ssd300_VIDDET/', help='Location to save checkpoint models')
-parser.add_argument('--dataset_name', default='VIDDET', help='Which dataset')
+parser.add_argument('--save_folder', default='./weights/tssd300_VID2017_b4_s16_ContiED_FixVggExtraLocConf90000_test/', help='Location to save checkpoint models')
+parser.add_argument('--dataset_name', default='seqVID2017', help='Which dataset')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
-parser.add_argument('--gpu_ids', default='2,3', type=str, help='gpu number')
-parser.add_argument('--augm_type', default='ssd', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
-parser.add_argument('--seq_len', default=16, type=int, help='Batch size for training')
-parser.add_argument('--set_file_name',  default='train_VID_DET', type=str, help='train set name')
+parser.add_argument('--gpu_ids', default='3,2', type=str, help='gpu number')
+parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
+parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
+parser.add_argument('--seq_len', default=8, type=int, help='Batch size for training')
+parser.add_argument('--set_file_name',  default='train_video_remove_no_object', type=str, help='train set name')
 
 args = parser.parse_args()
 
@@ -59,6 +59,7 @@ cfg = (v1, v2)[args.version == 'v2']
 
 if not os.path.exists(args.save_folder):
     os.mkdir(args.save_folder)
+
 if args.dataset_name=='VOC0712':
     train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
     num_classes = len(VOC_CLASSES) + 1
@@ -102,7 +103,11 @@ if args.cuda:
     net = torch.nn.DataParallel(ssd_net)
     cudnn.benchmark = True
 
-if args.resume_from_ssd != 'ssd':
+if args.resume:
+    print('Resuming training, loading {}...'.format(args.resume))
+    ssd_net.load_weights(args.resume)
+
+elif args.resume_from_ssd != 'ssd':
     from collections import OrderedDict
     print('training from pretrained vgg and extras, loading {}...'.format(args.resume_from_ssd))
     ssd_weights = torch.load(args.resume_from_ssd)
@@ -131,10 +136,6 @@ if args.resume_from_ssd != 'ssd':
         for freeze_net in freeze_nets:
             for param in freeze_net.parameters():
                 param.requires_grad = False
-
-elif args.resume:
-    print('Resuming training, loading {}...'.format(args.resume))
-    ssd_net.load_weights(args.resume)
 else:
     vgg_weights = torch.load(args.save_folder + '/../'+ args.basenet)# + '/../'
     print('Loading base network...')
@@ -146,27 +147,36 @@ if args.cuda:
 def xavier(param):
     init.xavier_uniform(param)
 
+def orthogonal(param):
+    init.orthogonal(param)
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
         xavier(m.weight.data)
         m.bias.data.zero_()
 
-if args.resume_from_ssd != 'ssd':
-    print('Initializing Multibox weights...')
-    # ssd_net.loc.apply(weights_init)
-    # ssd_net.conf.apply(weights_init)
-    if args.tssd in ['lstm']:
-        ssd_net.lstm.apply(weights_init)
-        ssd_net.reduce.apply(weights_init)
-elif not args.resume:
-    print('Initializing weights...')
-    # initialize newly added layers' weights with xavier method
-    ssd_net.extras.apply(weights_init)
-    ssd_net.loc.apply(weights_init)
-    ssd_net.conf.apply(weights_init)
-    if args.tssd in ['lstm']:
-        ssd_net.lstm.apply(weights_init)
+def orthogonal_weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        orthogonal(m.weight.data)
+        m.bias.data.fill_(1)
+
+if not args.resume:
+    if args.resume_from_ssd != 'ssd':
+        print('Initializing Multibox weights...')
+        # ssd_net.loc.apply(weights_init)
+        # ssd_net.conf.apply(weights_init)
+        if args.tssd in ['lstm', 'edlstm']:
+            ssd_net.lstm.apply(orthogonal_weights_init)
+            # ssd_net.reduce.apply(weights_init)
+    else:
+        print('Initializing weights...')
+        # initialize newly added layers' weights with xavier method
+        ssd_net.extras.apply(weights_init)
+        ssd_net.loc.apply(weights_init)
+        ssd_net.conf.apply(weights_init)
+        if args.tssd in ['lstm', 'edlstm']:
+            ssd_net.lstm.apply(orthogonal_weights_init)
+            # ssd_net.reduce.apply(weights_init)
 
 if args.augm_type == 'ssd':
     data_transform = SSDAugmentation
@@ -179,13 +189,9 @@ else:
 # base_params = filter(lambda p: id(p) not in lstm_params,
 #                      net.module.parameters())
 
-if args.tssd in ['lstm']:
-    optimizer = optim.SGD([
-            # {'params': net.module.loc.parameters()},
-            # {'params': net.module.conf.parameters()},
-            {'params': net.module.reduce.parameters()},
-            {'params': net.module.lstm.parameters()}
-            ], lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+if args.tssd in ['lstm', 'edlstm']:
+    optimizer = optim.SGD(net.module.lstm.parameters()
+            , lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
 else:
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
@@ -197,9 +203,6 @@ else:
 
 def train():
     net.train()
-    # loss counters
-    # loc_loss = 0  # epoch
-    # conf_loss = 0
     epoch = 0
     print('Loading Dataset...')
     dataset = VOCDetection(data_root, train_sets, data_transform(
@@ -208,7 +211,7 @@ def train():
 
     epoch_size = len(dataset) // args.batch_size
 
-    print('Training TSSD on', dataset.name, ', how many videos:', len(dataset), ', sequence length:', args.seq_len) if args.tssd in ['lstm'] else print('Training SSD on', dataset.name)
+    print('Training TSSD on', dataset.name, ', how many videos:', len(dataset), ', sequence length:', args.seq_len) if args.tssd in ['lstm', 'edlstm'] else print('Training SSD on', dataset.name)
     print('lr:',args.lr , 'steps:', stepvalues, 'max_liter:', max_iter)
     step_index = 0
     if args.visdom:
@@ -223,19 +226,10 @@ def train():
                 legend=['Loc Loss', 'Conf Loss', 'Loss']
             )
         )
-        # epoch_lot = viz.line(
-        #     X=torch.zeros((1,)).cpu(),
-        #     Y=torch.zeros((1, 3)).cpu(),
-        #     opts=dict(
-        #         xlabel='Epoch',
-        #         ylabel='Loss',
-        #         title='Epoch SSD Training Loss',
-        #         legend=['Loc Loss', 'Conf Loss', 'Loss']
-        #     )
-        # )
     batch_iterator = None
     data_loader = data.DataLoader(dataset, batch_size, num_workers=args.num_workers,
                                   shuffle=True, collate_fn=collate_fn, pin_memory=True)
+
     for iteration in range(args.start_iter, max_iter):
         if (not batch_iterator) or (iteration % epoch_size == 0):
             # create batch iterator
@@ -243,24 +237,9 @@ def train():
         if iteration in stepvalues:
             step_index += 1
             adjust_learning_rate(optimizer, args.gamma, step_index)
-            # if args.visdom:
-            #     viz.line(
-            #         X=torch.ones((1, 3)).cpu() * epoch,
-            #         Y=torch.Tensor([loc_loss, conf_loss,
-            #             loc_loss + conf_loss]).unsqueeze(0).cpu() / epoch_size,
-            #         win=epoch_lot,
-            #         update='append'
-            #     )
-            # reset epoch loss counters
-            loc_loss = 0
-            conf_loss = 0
             epoch += 1
 
-        # load train data
-        # t2 = time.time()
         images, targets = next(batch_iterator)
-        # t3 = time.time()
-        # print('collate a batch:', t3-t2)
 
         if args.cuda:
             images = Variable(images.cuda())
@@ -271,19 +250,17 @@ def train():
             targets = [[Variable(seq_anno, volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name=='seqVID2017' \
                 else [Variable(anno, volatile=True) for anno in targets]
 
-
         # forward
         t0 = time.time()
         out = net(images)
-        # backprop
         optimizer.zero_grad()
         loss_l, loss_c = criterion(out, targets)
         loss = loss_l + loss_c
         loss.backward()
+        nn.utils.clip_grad_norm(net.module.lstm.parameters(), 5)
         optimizer.step()
         t1 = time.time()
-        # loc_loss += loss_l.data[0]
-        # conf_loss += loss_c.data[0]
+
         if iteration % 10 == 0:
             print('Timer: %.4f sec.' % (t1 - t0))
             print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data[0]), end=' ')

@@ -242,6 +242,8 @@ class VOCDetection(data.Dataset):
             cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
             select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
                            uniform_list.index(x) not in cast_list]
+            # start = np.random.randint(video_size - self.seq_len)
+            # select_list = [x for x in range(0, 0 + self.seq_len)]
             img_name = [video_id[1]+'/'+str(i).zfill(6) for i in select_list]
             target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \
                                     [cv2.imread(self._imgpath % (video_id[0], img_name)) for img_name in img_name]
@@ -264,7 +266,7 @@ class VOCDetection(data.Dataset):
 
         # mirror = bool(np.random.randint(2))
         # expand = np.random.randint(2)
-        ratio = np.random.uniform(1, 4)
+        # ratio = np.random.uniform(1, 4)
         for i, (target, img) in enumerate(zip(target_list, img_list)):
             target = np.array(target)
             # img, boxes, labels = self.transform(img, target[:, :4], target[:, 4],mirror=mirror, expand=expand*ratio)
