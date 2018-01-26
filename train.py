@@ -42,7 +42,7 @@ parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='s
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='3,2', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
+parser.add_argument('--tssd',  default='gru', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=8, type=int, help='Batch size for training')
 parser.add_argument('--set_file_name',  default='train_video_remove_no_object', type=str, help='train set name')
 
@@ -106,6 +106,11 @@ if args.cuda:
 if args.resume:
     print('Resuming training, loading {}...'.format(args.resume))
     ssd_net.load_weights(args.resume)
+    if args.freeze:
+        freeze_nets = [ssd_net.vgg, ssd_net.extras]
+        for freeze_net in freeze_nets:
+            for param in freeze_net.parameters():
+                param.requires_grad = False
 
 elif args.resume_from_ssd != 'ssd':
     from collections import OrderedDict
@@ -131,7 +136,7 @@ elif args.resume_from_ssd != 'ssd':
     ssd_net.loc.load_state_dict(ssd_loc_weights)
     ssd_net.conf.load_state_dict(ssd_conf_weights)
     if args.freeze:
-        freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.loc, ssd_net.conf]
+        freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.conf, ssd_net.loc]
         # print('Freeze:', repr(freeze_nets))
         for freeze_net in freeze_nets:
             for param in freeze_net.parameters():
@@ -165,18 +170,20 @@ if not args.resume:
         print('Initializing Multibox weights...')
         # ssd_net.loc.apply(weights_init)
         # ssd_net.conf.apply(weights_init)
-        if args.tssd in ['lstm', 'edlstm']:
-            ssd_net.lstm.apply(orthogonal_weights_init)
-            # ssd_net.reduce.apply(weights_init)
+        if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm']:
+            ssd_net.rnn.apply(orthogonal_weights_init)
+            if args.tssd in ['tblstm']:
+                ssd_net.reduce.apply(weights_init)
     else:
         print('Initializing weights...')
         # initialize newly added layers' weights with xavier method
         ssd_net.extras.apply(weights_init)
         ssd_net.loc.apply(weights_init)
         ssd_net.conf.apply(weights_init)
-        if args.tssd in ['lstm', 'edlstm']:
-            ssd_net.lstm.apply(orthogonal_weights_init)
-            # ssd_net.reduce.apply(weights_init)
+        if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm']:
+            ssd_net.rnn.apply(orthogonal_weights_init)
+            if args.tssd in ['tblstm']:
+                ssd_net.reduce.apply(weights_init)
 
 if args.augm_type == 'ssd':
     data_transform = SSDAugmentation
@@ -189,9 +196,12 @@ else:
 # base_params = filter(lambda p: id(p) not in lstm_params,
 #                      net.module.parameters())
 
-if args.tssd in ['lstm', 'edlstm']:
-    optimizer = optim.SGD(net.module.lstm.parameters()
-            , lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm']:
+    optimizer = optim.RMSprop([{'params': net.module.rnn.parameters()},
+                               {'params': net.module.reduce.parameters()}],
+                               # {'params': net.module.conf.parameters()},
+                               # {'params': net.module.loc.parameters()}],
+                              lr=args.lr, weight_decay=args.weight_decay)
     criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
 else:
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
@@ -257,7 +267,7 @@ def train():
         loss_l, loss_c = criterion(out, targets)
         loss = loss_l + loss_c
         loss.backward()
-        nn.utils.clip_grad_norm(net.module.lstm.parameters(), 5)
+        nn.utils.clip_grad_norm(net.module.parameters(), 3)
         optimizer.step()
         t1 = time.time()
 
@@ -268,6 +278,19 @@ def train():
                 random_batch_index = np.random.randint(images.size(0))
                 viz.image(images.data[random_batch_index].cpu().numpy())
         if args.visdom:
+            if iteration == 1000:
+                if args.visdom:
+                    # initialize visdom loss plot
+                    lot = viz.line(
+                        X=torch.zeros((1,)).cpu(),
+                        Y=torch.zeros((1, 3)).cpu(),
+                        opts=dict(
+                            xlabel='Iteration',
+                            ylabel='Loss',
+                            title='Current SSD Training Loss',
+                            legend=['Loc Loss', 'Conf Loss', 'Loss']
+                        )
+                    )
             viz.line(
                 X=torch.ones((1, 3)).cpu() * iteration,
                 Y=torch.Tensor([loss_l.data[0], loss_c.data[0],
@@ -275,7 +298,8 @@ def train():
                 win=lot,
                 update='append'
             )
-        if iteration % 10000 == 0:
+
+        if iteration % 5000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), args.save_folder+'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth')
@@ -289,7 +313,7 @@ def adjust_learning_rate(optimizer, gamma, step):
     """
     # lr = args.lr * (gamma ** (step))
     for param_group in optimizer.param_groups:
-        param_group['lr'] *= (gamma ** (step))
+        param_group['lr'] *= gamma
 
 
 if __name__ == '__main__':

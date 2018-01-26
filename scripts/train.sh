@@ -1,4 +1,4 @@
-type='lstm'
+type='tblstm'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../train.py \
@@ -19,12 +19,12 @@ then
 elif [ $type = 'lstm' ]
 then
     pythonc3 ../train.py \
-    --lr 0.001 \
+    --lr 0.0001 \
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom false \
-    --save_folder '../weights/tssd300_VID2017_b4s16_DSkipBoth6EpisBack_DropClip_FixVggExtraLocConf160000/' \
-    --step_list 50000 80000 100000 \
+    --save_folder '../weights/tssd300_VID2017_b4s16_DSkipLstm6_DropInOut2Clip3_FixVggExtraTuneLocConfRnn10000/' \
+    --step_list 15000 30000 \
     --batch_size 4 \
     --seq_len 16 \
     --ssd_dim 300 \
@@ -33,6 +33,45 @@ then
     --augm_type 'base' \
     --set_file_name 'train_video_remove_no_object' \
     --tssd 'lstm' \
+    --resume_from_ssd '../weights/ssd300_VIDDET/ssd300_VIDDET_160000.pth' \
+    --freeze 'yes' \
+    --resume '../weights/tssd300_VID2017_b4s16_DSkipBoth6EpisBack_DropInOut2Clip5_FixVggExtraLocConf160000/ssd300_seqVID2017_10000_rnn.pth'
+elif [ $type = 'tblstm' ]
+then
+    pythonc3 ../train.py \
+    --lr 0.0001 \
+    --momentum 0.9 \
+    --visdom true \
+    --send_images_to_visdom false \
+    --save_folder '../weights/tssd300_VID2017_b4s24_DSkipTBLstm_RMSPw_DropInOut2Clip3_FixVggExtraLocConf160000/' \
+    --step_list 30000 40000 50000 \
+    --batch_size 4 \
+    --seq_len 24 \
+    --ssd_dim 300 \
+    --gpu_ids '2,3' \
+    --dataset_name 'seqVID2017' \
+    --augm_type 'base' \
+    --set_file_name 'train_video_remove_no_object' \
+    --tssd 'tblstm' \
+    --resume_from_ssd '../weights/ssd300_VIDDET/ssd300_VIDDET_160000.pth' \
+    --freeze 'yes'
+elif [ $type = 'gru' ]
+then
+    pythonc3 ../train.py \
+    --lr 0.0001 \
+    --momentum 0.9 \
+    --visdom true \
+    --send_images_to_visdom false \
+    --save_folder '../weights/tssd300_VID2017_b4s16_DSkipGru6_RMSPw_DropReUp2Clip5_FixVggExtraLocConf160000_test/' \
+    --step_list 50000 80000 100000 \
+    --batch_size 4 \
+    --seq_len 16 \
+    --ssd_dim 300 \
+    --gpu_ids '0,1s' \
+    --dataset_name 'seqVID2017' \
+    --augm_type 'base' \
+    --set_file_name 'train_video_remove_no_object' \
+    --tssd 'gru' \
     --resume_from_ssd '../weights/ssd300_VIDDET/ssd300_VIDDET_160000.pth' \
     --freeze 'yes'
 elif [ $type = 'edlstm' ]

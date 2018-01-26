@@ -260,9 +260,9 @@ class VOCDetection(data.Dataset):
         for i, (target, img) in enumerate(zip(target_list, img_list)):
             height, width, channels = img.shape
             target_list[i] = self.target_transform(target, width, height)
-            if len(target_list[i]) == 0:
-                target_list[i] = target_list[i-1]
-                img_list[i] = img_list[i-1]
+            # if len(target_list[i]) == 0:
+            #     target_list[i] = target_list[i-1]
+            #     img_list[i] = img_list[i-1]
 
         # mirror = bool(np.random.randint(2))
         # expand = np.random.randint(2)

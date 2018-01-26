@@ -144,18 +144,18 @@ class ConvLSTMCell(nn.Module):
             )
 
         prev_cell, prev_hidden = prev_state
-        prev_hidden_drop = F.dropout(prev_hidden, training=(False, True)[self.phase=='train'])
+        # prev_hidden_drop = F.dropout(prev_hidden, training=(False, True)[self.phase=='train'])
         # data size is [batch, channel, height, width]
-        stacked_inputs = torch.cat((input_, prev_hidden_drop), 1)
+        stacked_inputs = torch.cat((input_, prev_hidden), 1)
         gates = self.Gates(stacked_inputs)
 
         # chunk across channel dimension
         in_gate, remember_gate, out_gate, cell_gate = gates.chunk(4, 1)
 
         # apply sigmoid non linearity
-        in_gate = F.sigmoid(in_gate)
+        in_gate = F.dropout(F.sigmoid(in_gate), p=0.2, training=(False, True)[self.phase=='train'])
         remember_gate = F.sigmoid(remember_gate)
-        out_gate = F.sigmoid(out_gate)
+        out_gate = F.dropout(F.sigmoid(out_gate), p=0.2, training=(False, True)[self.phase=='train'])
 
         # apply tanh non linearity
         cell_gate = F.tanh(cell_gate)
@@ -232,6 +232,36 @@ class EDConvLSTMCell(nn.Module):
 
         return en_cell, en_hidden, de_cell, de_hidden
 
+class ConvGRUCell(nn.Module):
+    def __init__(self, input_size, hidden_size, kernel_size=3, cuda_flag=True, phase='train'):
+        super(ConvGRUCell, self).__init__()
+        self.input_size = input_size
+        self.cuda_flag = cuda_flag
+        self.hidden_size = hidden_size
+        self.kernel_size = kernel_size
+        self.ConvGates = nn.Conv2d(self.input_size + self.hidden_size, 2 * self.hidden_size, 3,
+                                   padding=self.kernel_size // 2)
+        self.Conv_ct = nn.Conv2d(self.input_size + self.hidden_size, self.hidden_size, 3, padding=self.kernel_size // 2)
+        dtype = torch.FloatTensor
+        self.phase = phase
+
+    def forward(self, input, hidden):
+        if hidden is None:
+            size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
+            if self.cuda_flag == True:
+                hidden = Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test']).cuda()
+            else:
+                hidden = Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test'])
+        c1 = self.ConvGates(torch.cat((input, hidden), 1))
+        (rt, ut) = c1.chunk(2, 1)
+        reset_gate = F.dropout(F.sigmoid(rt), p=0.2, training=(False, True)[self.phase=='train'])
+        update_gate = F.dropout(F.sigmoid(ut), p=0.2, training=(False, True)[self.phase=='train'])
+        gated_hidden = torch.mul(reset_gate, hidden)
+        p1 = self.Conv_ct(torch.cat((input, gated_hidden), 1))
+        ct = F.tanh(p1)
+        next_h = torch.mul(update_gate, hidden) + (1 - update_gate) * ct
+        return next_h
+
 class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', top_k=200,thresh= 0.01,nms_thresh=0.45):
@@ -251,18 +281,22 @@ class TSSD(nn.Module):
         self.lstm_mode = lstm
 
         # self.reduce = nn.ModuleList(head[0][0::2])
-        self.lstm = nn.ModuleList(head[2])
+        self.rnn = nn.ModuleList(head[2])
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
+        print(self.rnn)
+        if lstm == 'tblstm':
+            self.reduce=nn.Conv2d(1024, 512, kernel_size=1, stride=1)
+                                       # nn.Conv2d(512, 1024, kernel_size=1, stride=1)])
 
         if phase == 'test':
             self.softmax = nn.Softmax()
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
             # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
-    def forward(self, tx, lstm_state=None):
+    def forward(self, tx, state=None):
         if self.phase == "train":
-            lstm_state = [None] * len(self.lstm)
+            rnn_state = [None] * 6
             seq_output = []
             seq_sources = []
             for time_step in range(tx.size(1)):
@@ -290,14 +324,16 @@ class TSSD(nn.Module):
                         sources.append(x)
                 seq_sources.append(sources)
                 # apply multibox head to source layers
-                for i, (x, lstm, l, c) in enumerate(zip(sources, self.lstm, self.loc, self.conf)):
-                    # if i in [1,2,3,4]:
-                    lstm_state[i] = lstm(x, lstm_state[i])
-                        # loc.append(l(lstm_state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                    conf.append(c(lstm_state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                    # else:
-                    #     conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-                    loc.append(l(lstm_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                    if i == 1:
+                        x = self.reduce[0](x)
+                    rnn_state[i] = self.rnn[i//3](x, rnn_state[i])
+                    if i == 1:
+                        conf.append(c(self.reduce[1](rnn_state[i][-1])).permute(0, 2, 3, 1).contiguous())
+                        loc.append(l(self.reduce[1](rnn_state[i][-1])).permute(0, 2, 3, 1).contiguous())
+                    else:
+                        conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                        loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
 
                 loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
                 conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -310,7 +346,6 @@ class TSSD(nn.Module):
             return tuple(seq_output)
         elif self.phase == 'test':
 
-            # lstm_state  = state
             sources = list()
             loc = list()
             conf = list()
@@ -334,14 +369,15 @@ class TSSD(nn.Module):
                     sources.append(tx)
 
             # apply multibox head to source layers
-            for i, (x, lstm, l, c) in enumerate(zip(sources, self.lstm, self.loc, self.conf)):
-                if i in [1, 2, 3, 4]:
-                    lstm_state[i] = lstm(x, lstm_state[i])
-                    loc.append(l(lstm_state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                    # conf.append(c(lstm_state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                else:
-                    conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-                loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+            for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                # if i in [1, 2, 3, 4]:
+                if i == 1:
+                    x = self.reduce(x)
+                state[i] = self.rnn[i//3](x, state[i])
+                conf.append(c(state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                    # conf.append(c(rnn[i][-1]).permute(0, 2, 3, 1).contiguous())
+                # else:
+                loc.append(l(state[i][-1]).permute(0, 2, 3, 1).contiguous())
 
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -352,7 +388,7 @@ class TSSD(nn.Module):
                 self.priors.type(type(tx.data))  # default boxes
             )
 
-            return output, lstm_state
+            return output, state
 
 
     def load_weights(self, base_file):
@@ -408,39 +444,51 @@ def add_extras(cfg, i, batch_norm=False):
 def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
     loc_layers = []
     conf_layers = []
-    lstm_layer = []
+    rnn_layer = []
     vgg_source = [24, -2]
     for k, v in enumerate(vgg_source):
 
         if k in [0,1]:
             if lstm in ['edlstm']:
-                lstm_layer += [EDConvLSTMCell(vgg[v].out_channels, [int(vgg[v].out_channels/2),vgg[v].out_channels], phase=phase)]
+                rnn_layer += [EDConvLSTMCell(vgg[v].out_channels, [int(vgg[v].out_channels/2),vgg[v].out_channels], phase=phase)]
             elif lstm in ['lstm']:
-                lstm_layer += [ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels, phase=phase)]
+                rnn_layer += [ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels, phase=phase)]
+            elif lstm in ['gru']:
+                rnn_layer += [ConvGRUCell(vgg[v].out_channels, vgg[v].out_channels, phase=phase)]
             else:
-                lstm_layer += [None]
+                rnn_layer += [None]
         else:
-            lstm_layer += [None]
-        loc_layers += [nn.Conv2d(vgg[v].out_channels,
+            rnn_layer += [None]
+        if lstm in ['tblstm'] and k==1:
+            loc_layers += [nn.Conv2d(int(vgg[v].out_channels/2),
+                                     cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(int(vgg[v].out_channels/2),
+                                      cfg[k] * num_classes, kernel_size=3, padding=1)]
+        else:
+            loc_layers += [nn.Conv2d(vgg[v].out_channels,
                                  cfg[k] * 4, kernel_size=3, padding=1)]
-        conf_layers += [nn.Conv2d(vgg[v].out_channels,
+            conf_layers += [nn.Conv2d(vgg[v].out_channels,
                         cfg[k] * num_classes, kernel_size=3, padding=1)]
     for k, v in enumerate(extra_layers[1::2], 2):
 
         if  k in [2,3,4, 5]:
             if lstm in ['edlstm']:
-                lstm_layer += [EDConvLSTMCell(v.out_channels, [int(v.out_channels/2), v.out_channels], phase=phase)]
+                rnn_layer += [EDConvLSTMCell(v.out_channels, [int(v.out_channels/2), v.out_channels], phase=phase)]
             elif lstm in ['lstm']:
-                lstm_layer += [ConvLSTMCell(v.out_channels, v.out_channels, phase=phase)]
+                rnn_layer += [ConvLSTMCell(v.out_channels, v.out_channels, phase=phase)]
+            elif lstm in ['gru']:
+                rnn_layer += [ConvGRUCell(v.out_channels, v.out_channels, phase=phase)]
             else:
-                lstm_layer += [None]
+                rnn_layer += [None]
         else:
-            lstm_layer += [None]
+            rnn_layer += [None]
         loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
                                  * 4, kernel_size=3, padding=1)]
         conf_layers += [nn.Conv2d(v.out_channels, cfg[k]
                                   * num_classes, kernel_size=3, padding=1)]
-    return vgg, extra_layers, (loc_layers, conf_layers, lstm_layer)
+        if lstm in ['tblstm']:
+            rnn_layer = [ConvLSTMCell(512, 512, phase=phase), ConvLSTMCell(256, 256, phase=phase)]
+    return vgg, extra_layers, (loc_layers, conf_layers, rnn_layer)
 
 
 base = {

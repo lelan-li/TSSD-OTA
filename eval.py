@@ -90,9 +90,10 @@ pkl_dir = os.path.join(args.save_folder, args.model_dir.split('/')[-1])
 if args.model_dir == '../weights/ssd300_VIDDET':
     trained_model = os.path.join(args.model_dir, args.model_dir.split('/')[-1] +'_' + args.literation +'.pth')
 else:
-    trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth') \
-    if args.tssd in ['lstm', 'edlstm'] else os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
-
+    if args.tssd in ['lstm', 'edlstm', 'tblstm', 'gru']:
+        trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth')
+    else:
+        trained_model = os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
 
 class Timer(object):
     """A simple timer."""
@@ -413,7 +414,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     _t = {'im_detect': Timer(), 'misc': Timer()}
     output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
-    state = [None] * 6 if tssd in ['lstm', 'edlstm'] else None
+    state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm', 'gru'] else None
     pre_video_name = None
     for i in range(num_images):
         im, gt, h, w = dataset.pull_item(i)
@@ -422,7 +423,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         img_id = dataset.pull_img_id(i)
         video_name = img_id[1].split('/')[0]
         if video_name != pre_video_name:
-            state = [None] * 6 if tssd in['lstm', 'edlstm'] else None
+            state = [None] * 6 if tssd in['lstm', 'edlstm','tblstm', 'gru'] else None
             pre_video_name = video_name
 
         x = Variable(im.unsqueeze(0))
