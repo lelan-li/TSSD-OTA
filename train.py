@@ -19,13 +19,13 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Training')
 parser.add_argument('--version', default='v2', help='conv11_2(v2) or pool6(v1) as last layer')
-parser.add_argument('--basenet', default='vgg16_reducedfc.pth', help='pretrained base model')
+parser.add_argument('--basenet', default='vgg16_reducedfc_512.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
-parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=2, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint')
-parser.add_argument('--resume_from_ssd', default='./weights/ssd300_VIDDET/ssd300_VIDDET_90000.pth', type=str, help='Resume vgg and extras from ssd checkpoint')
+parser.add_argument('--resume_from_ssd', default='./weights/ssd300_VIDDET/ssd300_VIDDET_160000.pth', type=str, help='Resume vgg and extras from ssd checkpoint')
 parser.add_argument('--freeze', default=False, type=str2bool, help='Freeze')
-parser.add_argument('--num_workers', default=2, type=int, help='Number of workers used in dataloading')
+parser.add_argument('--num_workers', default=1, type=int, help='Number of workers used in dataloading')
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
 parser.add_argument('--start_iter', default=0, type=int, help='Begin counting iterations starting from this value (should be used with resume)')
 parser.add_argument('--cuda', default=True, type=str2bool, help='Use cuda to train model')
@@ -36,15 +36,15 @@ parser.add_argument('--gamma', default=0.1, type=float, help='Gamma update for S
 parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss at each iteration')
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
-parser.add_argument('--save_folder', default='./weights/tssd300_VID2017_b4_s16_ContiED_FixVggExtraLocConf90000_test/', help='Location to save checkpoint models')
-parser.add_argument('--dataset_name', default='seqVID2017', help='Which dataset')
+parser.add_argument('--save_folder', default='./weights/test/', help='Location to save checkpoint models')
+parser.add_argument('--dataset_name', default='VIDDET', help='Which dataset')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='3,2', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='gru', type=str, help='ssd or tssd')
-parser.add_argument('--seq_len', default=8, type=int, help='Batch size for training')
-parser.add_argument('--set_file_name',  default='train_video_remove_no_object', type=str, help='train set name')
+parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
+parser.add_argument('--seq_len', default=2, type=int, help='Batch size for training')
+parser.add_argument('--set_file_name',  default='train_VID_DET', type=str, help='train set name')
 
 args = parser.parse_args()
 
@@ -136,8 +136,7 @@ elif args.resume_from_ssd != 'ssd':
     ssd_net.loc.load_state_dict(ssd_loc_weights)
     ssd_net.conf.load_state_dict(ssd_conf_weights)
     if args.freeze:
-        freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.conf, ssd_net.loc]
-        # print('Freeze:', repr(freeze_nets))
+        freeze_nets = [ssd_net.vgg, ssd_net.extras]
         for freeze_net in freeze_nets:
             for param in freeze_net.parameters():
                 param.requires_grad = False
@@ -168,11 +167,11 @@ def orthogonal_weights_init(m):
 if not args.resume:
     if args.resume_from_ssd != 'ssd':
         print('Initializing Multibox weights...')
-        # ssd_net.loc.apply(weights_init)
-        # ssd_net.conf.apply(weights_init)
-        if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm']:
+        ssd_net.loc.apply(weights_init)
+        ssd_net.conf.apply(weights_init)
+        if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm',  'tbedlstm']:
             ssd_net.rnn.apply(orthogonal_weights_init)
-            if args.tssd in ['tblstm']:
+            if args.tssd in ['tblstm', 'tbedlstm']:
                 ssd_net.reduce.apply(weights_init)
     else:
         print('Initializing weights...')
@@ -180,9 +179,9 @@ if not args.resume:
         ssd_net.extras.apply(weights_init)
         ssd_net.loc.apply(weights_init)
         ssd_net.conf.apply(weights_init)
-        if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm']:
+        if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm','tbedlstm']:
             ssd_net.rnn.apply(orthogonal_weights_init)
-            if args.tssd in ['tblstm']:
+            if args.tssd in ['tblstm','tbedlstm']:
                 ssd_net.reduce.apply(weights_init)
 
 if args.augm_type == 'ssd':
@@ -196,15 +195,21 @@ else:
 # base_params = filter(lambda p: id(p) not in lstm_params,
 #                      net.module.parameters())
 
-if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm']:
-    optimizer = optim.RMSprop([{'params': net.module.rnn.parameters()},
-                               {'params': net.module.reduce.parameters()}],
-                               # {'params': net.module.conf.parameters()},
-                               # {'params': net.module.loc.parameters()}],
-                              lr=args.lr, weight_decay=args.weight_decay)
+if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm', 'tbedlstm']:
+    # optimizer = optim.RMSprop([{'params': net.module.rnn.parameters()},
+    #                            {'params': net.module.reduce.parameters()},
+    #                            {'params': net.module.conf.parameters()},
+    #                            {'params': net.module.loc.parameters()}],
+    #                           lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = optim.RMSprop(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
 else:
-    optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = optim.SGD(net.parameters()
+                          # [{'params': net.module.vgg.parameters(), 'lr':args.lr/10},
+                          #  {'params': net.module.extras.parameters(),'lr':args.lr/10},
+                          #  {'params': net.module.conf.parameters()},
+                          #  {'params': net.module.loc.parameters()}]
+                          , lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
 
 
@@ -267,7 +272,7 @@ def train():
         loss_l, loss_c = criterion(out, targets)
         loss = loss_l + loss_c
         loss.backward()
-        nn.utils.clip_grad_norm(net.module.parameters(), 3)
+        # nn.utils.clip_grad_norm(net.module.parameters(), 5)
         optimizer.step()
         t1 = time.time()
 
@@ -299,7 +304,7 @@ def train():
                 update='append'
             )
 
-        if iteration % 5000 == 0:
+        if iteration % 10000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), args.save_folder+'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth')

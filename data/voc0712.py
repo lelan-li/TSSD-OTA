@@ -237,16 +237,23 @@ class VOCDetection(data.Dataset):
                     img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
                     residue -= 1
         else:
-            skip = int(video_size / self.seq_len)
-            uniform_list = list(range(0, video_size, skip))
-            cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
-            select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
-                           uniform_list.index(x) not in cast_list]
+            ## D Skip
+            # skip = int(video_size / self.seq_len)
+            # uniform_list = list(range(0, video_size, skip))
+            # cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
+            # select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
+            #                uniform_list.index(x) not in cast_list]
+            ## R Cont
             # start = np.random.randint(video_size - self.seq_len)
-            # select_list = [x for x in range(0, 0 + self.seq_len)]
+            # select_list = [x for x in range(start, start + self.seq_len)]
+            ## R Skip
+            skip = random.randint(1, int(video_size / self.seq_len))
+            start = random.randint(0, video_size - self.seq_len * skip + 1)
+            select_list = list(range(start, video_size, skip))[:self.seq_len]
             img_name = [video_id[1]+'/'+str(i).zfill(6) for i in select_list]
             target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \
                                     [cv2.imread(self._imgpath % (video_id[0], img_name)) for img_name in img_name]
+
 
         return target_list, img_list
 
@@ -260,6 +267,14 @@ class VOCDetection(data.Dataset):
         for i, (target, img) in enumerate(zip(target_list, img_list)):
             height, width, channels = img.shape
             target_list[i] = self.target_transform(target, width, height)
+
+        # for seq_tar, img in zip(target_list, img_list):
+        #     for tar in seq_tar:
+        #         x_min, y_min, x_max, y_max, cls = tar
+        #         print(cls)
+        #         img = cv2.rectangle(img, (int(x_min*width),int(y_min*height)), (int(x_max*width),int(y_max*height)), (255,0,0),10)
+        #         cv2.imshow('test',img)
+        #     cv2.waitKey(0)
             # if len(target_list[i]) == 0:
             #     target_list[i] = target_list[i-1]
             #     img_list[i] = img_list[i-1]
@@ -298,7 +313,7 @@ class VOCDetection(data.Dataset):
             # print(x_min, y_min, x_max, y_max)
             # img = cv2.rectangle(img, (int(x_min*width),int(y_min*height)), (int(x_max*width),int(y_max*height)), (255,0,0),10)
             # cv2.imshow('test', img)
-            # cv2.waitKey(0)
+            # cv2.waitKey(1)
 
         if self.transform is not None:
             target = np.array(target)

@@ -130,7 +130,7 @@ if __name__ == '__main__':
     else:
         trained_model = os.path.join(args.model_dir,
                                      args.model_name + '_' + 'seq' + args.dataset_name + '_' + args.literation + '.pth') \
-            if args.tssd in ['lstm'] else os.path.join(args.model_dir,
+            if args.tssd in ['lstm', 'tblstm'] else os.path.join(args.model_dir,
                                                        args.model_name + '_' + args.dataset_name + '_' + args.literation + '.pth')
 
     print('loading model!')
@@ -150,7 +150,7 @@ if __name__ == '__main__':
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
-    state = [None]*6 if args.tssd in ['lstm'] else None
+    state = [None]*6 if args.tssd in ['lstm', 'tblstm'] else None
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:

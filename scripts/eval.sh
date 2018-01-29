@@ -1,4 +1,4 @@
-type='tblstm'
+type='ssd'
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
@@ -8,9 +8,9 @@ gpu_id='1'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/ssd300_VIDDET' \
+    --model_dir '../weights/ssd300_VIDDET_186' \
     --model_name ssd300 \
-    --literation 160000 \
+    --literation 10000 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
@@ -40,7 +40,23 @@ then
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/tssd300_VID2017_b4s16_DSkipTBLstm_RMSPw_DropInOut2Clip3_FixVggExtraPreLocConf160000' \
+    --model_dir '../weights/tssd300_VID2017_b8s8_DSkipTBLstm_RMSPw_DropInOut2Clip5_FixVggExtraPreLocConf160000' \
+    --model_name 'ssd300' \
+    --literation 5000 \
+    --save_folder '../eval' \
+    --confidence_threshold $conf_thresh \
+    --nms_threshold $nms_thresh \
+    --top_k $top_k \
+    --ssd_dim 300 \
+    --set_file_name $set_file_name \
+    --dataset_name 'VID2017' \
+    --tssd $type \
+    --gpu_id $gpu_id \
+    --detection $detection
+elif [ $type = 'tbedlstm' ]
+then
+    pythonc3 ../eval.py \
+    --model_dir '../weights/tssd300_VID2017_b8s8_DSkipTBDoLstm_RMSPw_DropInOut2Clip5_FixVggExtraPreLocConf160000' \
     --model_name 'ssd300' \
     --literation 5000 \
     --save_folder '../eval' \

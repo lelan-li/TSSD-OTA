@@ -191,10 +191,22 @@ class seqMultiBoxLoss(nn.Module):
             targets_weighted = conf_t[(pos+neg).gt(0)]
             loss_c = F.cross_entropy(conf_p, targets_weighted, size_average=False)
 
-            # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
+            conf_p_pos = conf_data[(pos_idx).gt(0)].view(-1, self.num_classes)
+            targets_pos = conf_t[pos.gt(0)]
+    # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
 
             N = num_pos.data.sum()
             seq_loss_l += loss_l / N
             seq_loss_c += loss_c / N
+            # consistency
+            # num_pos_box = num_pos.cpu().data.numpy()
+            # num_box_batch_before = 0
+            # conf_p_pos_batch = []
+            # cls_batch = []
+            # for num_box in num_pos_box:
+            #     conf_softmax = F.softmax(conf_p_pos[num_box_batch_before:num_box_batch_before+num_box[0],:])
+            #     # conf_p_pos_batch.append(F.softmax(conf_p_pos[num_box_batch_before:num_box_batch_before+num_box[0],:]))
+            #     cls_batch.append(torch.max(conf_softmax, 1)[1])
+            #     num_box_batch_before += num_box[0]
 
         return seq_loss_l/len(seq_predictions), seq_loss_c/len(seq_predictions)
