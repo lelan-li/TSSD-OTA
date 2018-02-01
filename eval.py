@@ -54,6 +54,7 @@ parser.add_argument('--model_dir', default='../weights/tssd300_VID2017_b4_s16_Sk
 parser.add_argument('--detection', default='no', type=str2bool, help='detection or not')
 parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id', default='2.3', type=str,help='gpu id')
+parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 
 
 args = parser.parse_args()
@@ -87,10 +88,10 @@ elif args.dataset_name == 'VID2017':
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
 pkl_dir = os.path.join(args.save_folder, args.model_dir.split('/')[-1])
-if args.model_dir.split('/')[-1] in ['ssd300_VIDDET', 'ssd300_VIDDET_186', 'ssd300c512_VIDDET']:
+if args.model_dir.split('/')[-1] in ['ssd300_VIDDET', 'ssd300_VIDDET_186', 'ssd300c512_VIDDET','ssd300_VIDDET_512','attssd300_VIDDET_512', 'attssd300_VIDDET_512_atthalf']:
     trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation +'.pth')
 else:
-    if args.tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru']:
+    if args.tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm']:
         trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth')
     else:
         trained_model = os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
@@ -414,17 +415,17 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     _t = {'im_detect': Timer(), 'misc': Timer()}
     output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
-    state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru'] else None
+    state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
     pre_video_name = None
     for i in range(num_images):
-        im, gt, h, w = dataset.pull_item(i)
+        im, gt, h, w, _ = dataset.pull_item(i)
         if len(gt) == 0:
             continue
         img_id = dataset.pull_img_id(i)
         # print(img_id[1])
         video_name = img_id[1].split('/')[0]
         if video_name != pre_video_name:
-            state = [None] * 6 if tssd in['lstm', 'edlstm','tblstm', 'tbedlstm', 'gru'] else None
+            state = [None] * 6 if tssd in['lstm', 'edlstm','tblstm', 'tbedlstm', 'gru', 'outlstm'] else None
             pre_video_name = video_name
             # print('yes')
 
@@ -433,9 +434,10 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             x = x.cuda()
         _t['im_detect'].tic()
         if tssd == 'ssd':
-            detections = net(x).data
+            detections,_ = net(x)
+            detections = detections.data
         else:
-            detections, state = net(x, state)
+            detections, state, _ = net(x, state)
             detections = detections.data
         detect_time = _t['im_detect'].toc(average=False)
 
@@ -486,7 +488,9 @@ if __name__ == '__main__':
         net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
-                        nms_thresh=args.nms_threshold)
+                        nms_thresh=args.nms_threshold,
+                        attention=args.attention
+                        )
         net.load_state_dict(torch.load(trained_model))
         net.eval()
         print('Finished loading model!', args.model_dir, args.literation)

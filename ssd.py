@@ -23,10 +23,11 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45):
+    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
+        self.attention_flag = attention
         # TODO: implement __call__ in PriorBox
         self.priorbox = PriorBox(v2)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
@@ -40,6 +41,10 @@ class SSD(nn.Module):
 
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
+        if self.attention_flag:
+            self.attention = nn.ModuleList([ConvAttention(512),ConvAttention(256)])
+                                            # ConvAttention(512),ConvAttention(256),
+                                            # ConvAttention(256),ConvAttention(256)])
 
         if phase == 'test':
             self.softmax = nn.Softmax()
@@ -68,6 +73,7 @@ class SSD(nn.Module):
         sources = list()
         loc = list()
         conf = list()
+        a_map = list()
 
         # apply vgg up to conv4_3 relu
         for k in range(23):
@@ -88,9 +94,16 @@ class SSD(nn.Module):
                 sources.append(x)
 
         # apply multibox head to source layers
-        for (x, l, c) in zip(sources, self.loc, self.conf):
-            loc.append(l(x).permute(0, 2, 3, 1).contiguous()) # [ith_multi_layer, batch, height, width, out_channel]
-            conf.append(c(x).permute(0, 2, 3, 1).contiguous())
+        if self.attention_flag:
+            for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                a_map.append(self.attention[i//3](x))
+                a_feat = x*a_map[-1]
+                loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())  # [ith_multi_layer, batch, height, width, out_channel]
+                conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
+        else:
+            for (x, l, c) in zip(sources, self.loc, self.conf):
+                loc.append(l(x).permute(0, 2, 3, 1).contiguous()) # [ith_multi_layer, batch, height, width, out_channel]
+                conf.append(c(x).permute(0, 2, 3, 1).contiguous())
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
@@ -103,9 +116,9 @@ class SSD(nn.Module):
             output = (
                 loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes),
-                self.priors
+                self.priors,
             )
-        return output
+        return output, tuple(a_map)
 
     def load_weights(self, base_file):
         other, ext = os.path.splitext(base_file)
@@ -115,6 +128,23 @@ class SSD(nn.Module):
             print('Finished!')
         else:
             print('Sorry only .pth and .pkl files supported.')
+
+class ConvAttention(nn.Module):
+
+    def __init__(self, inchannel):
+        super(ConvAttention, self).__init__()
+        self.attention = nn.Sequential(
+            nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(inchannel, 1, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Sigmoid()
+        )
+    def forward(self, feats):
+        return self.attention(feats)
+
+
 
 # https://www.jianshu.com/p/72124b007f7d
 class ConvLSTMCell(nn.Module):
@@ -146,7 +176,7 @@ class ConvLSTMCell(nn.Module):
         prev_cell, prev_hidden = prev_state
         # prev_hidden_drop = F.dropout(prev_hidden, training=(False, True)[self.phase=='train'])
         # data size is [batch, channel, height, width]
-        stacked_inputs = torch.cat((input_, prev_hidden), 1)
+        stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), prev_hidden), 1)
         gates = self.Gates(stacked_inputs)
 
         # chunk across channel dimension
@@ -165,6 +195,16 @@ class ConvLSTMCell(nn.Module):
         hidden = out_gate * F.tanh(cell)
 
         return cell, hidden
+
+    def init_state(self, input_):
+        batch_size = input_.data.size()[0]
+        spatial_size = input_.data.size()[2:]
+        state_size = [batch_size, self.hidden_size] + list(spatial_size)
+        state = (
+            Variable(torch.zeros(state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(state_size), volatile=(False, True)[self.phase == 'test'])
+        )
+        return state
 
 class EDConvLSTMCell(nn.Module):
     """
@@ -264,7 +304,7 @@ class ConvGRUCell(nn.Module):
 
 class TSSD(nn.Module):
 
-    def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', top_k=200,thresh= 0.01,nms_thresh=0.45):
+    def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -272,6 +312,7 @@ class TSSD(nn.Module):
         self.priorbox = PriorBox(v2)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
         self.size = 300
+        self.attention_flag = attention
 
         # SSD network
         self.vgg = nn.ModuleList(base)
@@ -284,10 +325,11 @@ class TSSD(nn.Module):
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
         print(self.rnn)
-        if lstm in ['tblstm', 'tbedlstm']:
-            # self.reduce=nn.ModuleList([ nn.Conv2d(1024, 512, kernel_size=1, stride=1),
-            #                             nn.Conv2d(512, 1024, kernel_size=1, stride=1)])
-            self.reduce = nn.Conv2d(1024, 512, kernel_size=1, stride=1)
+        if self.attention_flag:
+            in_channel = 512
+            self.attention = nn.ModuleList([ConvAttention(in_channel*2), ConvAttention(in_channel)])
+                                            # ConvAttention(in_channel*2), ConvAttention(in_channel),
+                                            # ConvAttention(in_channel), ConvAttention(in_channel)])
 
         if phase == 'test':
             self.softmax = nn.Softmax()
@@ -297,13 +339,16 @@ class TSSD(nn.Module):
     def forward(self, tx, state=None):
         if self.phase == "train":
             rnn_state = [None] * 6
-            seq_output = []
-            seq_sources = []
+
+            seq_output = list()
+            seq_sources = list()
+            seq_a_map = []
             for time_step in range(tx.size(1)):
                 x = tx[:,time_step,:,:]
                 sources = list()
                 loc = list()
                 conf = list()
+                a_map = list()
 
                 # apply vgg up to conv4_3 relu
                 for k in range(23):
@@ -324,31 +369,38 @@ class TSSD(nn.Module):
                         sources.append(x)
                 seq_sources.append(sources)
                 # apply multibox head to source layers
-                for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
-                    if i == 1:
-                        x = self.reduce(x)
-                    rnn_state[i] = self.rnn[i//3](x, rnn_state[i])
-                    # if i == 1:
-                    #     conf.append(c(self.reduce[1](rnn_state[i][-1])).permute(0, 2, 3, 1).contiguous())
-                    #     loc.append(l(self.reduce[1](rnn_state[i][-1])).permute(0, 2, 3, 1).contiguous())
-                    # else:
-                    conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                    loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                if self.attention_flag:
+                    for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                        if time_step == 0:
+                            rnn_state[i] = self.rnn[i // 3].init_state(x)
+                        a_map.append(self.attention[i//3](torch.cat((x, rnn_state[i][-1]),1)))
+                        # a_map.append(a(x))
+                        a_feat = x*(a_map[-1])
+                        rnn_state[i] = self.rnn[i//3](a_feat, rnn_state[i])
+                        conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                        loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                else:
+                    for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                        rnn_state[i] = self.rnn[i//3](x, rnn_state[i])
+                        conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                        loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
 
                 loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
                 conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
                 output = (
                     loc.view(loc.size(0), -1, 4),
                     conf.view(conf.size(0), -1, self.num_classes),
-                    self.priors
+                    self.priors,
                 )
                 seq_output.append(output)
-            return tuple(seq_output)
+                seq_a_map.append(tuple(a_map))
+            return tuple(seq_output), tuple(seq_a_map)
         elif self.phase == 'test':
 
             sources = list()
             loc = list()
             conf = list()
+            a_map = list()
 
             # apply vgg up to conv4_3 relu
             for k in range(23):
@@ -369,17 +421,21 @@ class TSSD(nn.Module):
                     sources.append(tx)
 
             # apply multibox head to source layers
-            for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
-                # if i in [1, 2, 3, 4]:
-                if i == 1:
-                    x = self.reduce(x)
-                state[i] = self.rnn[i//3](x, state[i])
-                # if i == 1:
-                #     conf.append(c(self.reduce[1](state[i][-1])).permute(0, 2, 3, 1).contiguous())
-                #     loc.append(l(self.reduce[1](state[i][-1])).permute(0, 2, 3, 1).contiguous())
-                # else:
-                conf.append(c(state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                loc.append(l(state[i][-1]).permute(0, 2, 3, 1).contiguous())
+            if self.attention_flag:
+                for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                    if state[i] is None:
+                        state[i] = self.rnn[i // 3].init_state(x)
+                    a_map.append(self.attention[i // 3](torch.cat((x, state[i][-1]), 1)))
+                    # a_map.append(a(x))
+                    a_feat = x * (a_map[-1])
+                    state[i] = self.rnn[i // 3](a_feat, state[i])
+                    conf.append(c(state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                    loc.append(l(state[i][-1]).permute(0, 2, 3, 1).contiguous())
+            else:
+                for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                    state[i] = self.rnn[0](c(x), state[i])
+                    conf.append(self.rnn[1](state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                    loc.append(l(x).permute(0, 2, 3, 1).contiguous())
 
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -390,7 +446,7 @@ class TSSD(nn.Module):
                 self.priors.type(type(tx.data))  # default boxes
             )
 
-            return output, state
+            return output, state, tuple(a_map)
 
 
     def load_weights(self, base_file):
@@ -422,7 +478,7 @@ def vgg(cfg, i, batch_norm=False):
     pool5 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
     conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)
     # conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
-    conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
+    conv7 = nn.Conv2d(1024, 512, kernel_size=1)
     layers += [pool5, conv6,
                nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
     return layers
@@ -451,43 +507,18 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
     vgg_source = [24, -2]
     for k, v in enumerate(vgg_source):
 
-        if lstm in ['edlstm']:
-            rnn_layer += [EDConvLSTMCell(vgg[v].out_channels, [int(vgg[v].out_channels/2),vgg[v].out_channels], phase=phase)]
-        elif lstm in ['lstm']:
-            rnn_layer += [ConvLSTMCell(vgg[v].out_channels, vgg[v].out_channels, phase=phase)]
-        elif lstm in ['gru']:
-            rnn_layer += [ConvGRUCell(vgg[v].out_channels, vgg[v].out_channels, phase=phase)]
-        else:
-            rnn_layer += [None]
-        if lstm in ['tblstm', 'tbedlstm'] and k==1:
-            loc_layers += [nn.Conv2d(int(vgg[v].out_channels/2),
-                                     cfg[k] * 4, kernel_size=3, padding=1)]
-            conf_layers += [nn.Conv2d(int(vgg[v].out_channels/2),
-                                      cfg[k] * num_classes, kernel_size=3, padding=1)]
-        else:
-            loc_layers += [nn.Conv2d(vgg[v].out_channels,
+        loc_layers += [nn.Conv2d(vgg[v].out_channels,
                                  cfg[k] * 4, kernel_size=3, padding=1)]
-            conf_layers += [nn.Conv2d(vgg[v].out_channels,
+        conf_layers += [nn.Conv2d(vgg[v].out_channels,
                         cfg[k] * num_classes, kernel_size=3, padding=1)]
     for k, v in enumerate(extra_layers[1::2], 2):
-
-        if lstm in ['edlstm']:
-            rnn_layer += [EDConvLSTMCell(v.out_channels, [int(v.out_channels/2), v.out_channels], phase=phase)]
-        elif lstm in ['lstm']:
-            rnn_layer += [ConvLSTMCell(v.out_channels, v.out_channels, phase=phase)]
-        elif lstm in ['gru']:
-            rnn_layer += [ConvGRUCell(v.out_channels, v.out_channels, phase=phase)]
-        else:
-            rnn_layer += [None]
 
         loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
                                  * 4, kernel_size=3, padding=1)]
         conf_layers += [nn.Conv2d(v.out_channels, cfg[k]
                                   * num_classes, kernel_size=3, padding=1)]
     if lstm in ['tblstm']:
-        rnn_layer = [ConvLSTMCell(512, 512, phase=phase), ConvLSTMCell(256, 256, phase=phase)]
-    elif lstm in ['tbedlstm']:
-        rnn_layer = [EDConvLSTMCell(512, [512, 512], phase=phase), EDConvLSTMCell(256, [256, 256], phase=phase)]
+        rnn_layer = [ConvLSTMCell(512,512,phase=phase), ConvLSTMCell(256,256,phase=phase)]
     return vgg, extra_layers, (loc_layers, conf_layers, rnn_layer)
 
 
@@ -502,12 +533,12 @@ extras = {
     '512': [],
 }
 mbox = {
-    '300': [6, 6, 6, 6, 6, 6],  # number of boxes per feature map location
+    '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
     '512': [],
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, nms_thresh=0.45):
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, nms_thresh=0.45, attention=False):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -516,11 +547,11 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
         return
     if tssd == 'ssd':
         return SSD(phase, *multibox(vgg(base[str(size)], 3),
-                                    add_extras(extras[str(size)], 1024),
+                                    add_extras(extras[str(size)], 512),
                                     mbox[str(size)], num_classes, phase=phase), num_classes,
-                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh)
+                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3),
                                 add_extras(extras[str(size)], 512),
                                 mbox[str(size)], num_classes, lstm=tssd, phase=phase), num_classes, lstm=tssd,
-                    top_k=top_k, thresh=thresh, nms_thresh=nms_thresh)
+                    top_k=top_k, thresh=thresh, nms_thresh=nms_thresh, attention=attention)
