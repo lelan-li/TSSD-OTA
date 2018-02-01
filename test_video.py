@@ -10,6 +10,8 @@ import torch.utils.data as data
 
 from data import base_transform, VID_CLASSES, VID_CLASSES_name
 from ssd import build_ssd
+from layers.modules import  AttentionLoss
+
 
 import sys
 import os
@@ -39,6 +41,7 @@ parser.add_argument('--model_dir', default='./weights/ssd300_VID2017', type=str,
 parser.add_argument('--video_name', default='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2017_val_00131000.mp4', type=str,help='Path to video')
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id',  default='1', type=str, help='gpu_id')
+parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 
 
 args = parser.parse_args()
@@ -90,10 +93,11 @@ def test_net(net, im, w, h, state=None, thresh=0.5, tim=None):
     if args.cuda:
         x = x.cuda()
     if args.tssd == 'ssd':
-        detections = net(x).data
+        detections, att_map = net(x)
+        detections = detections.data
     else:
         tim.tic()
-        detections, state = net(x, state)
+        detections, state, att_map = net(x, state)
         detections = detections.data
         t_diff = tim.toc(average=True)
         print(np.around(t_diff, decimals=4))
@@ -117,7 +121,7 @@ def test_net(net, im, w, h, state=None, thresh=0.5, tim=None):
                 cv2.fillConvexPoly(im, np.array([[x_min, y_min], [x_min, y_min+30], [x_max-30, y_min+30],[x_max-30, y_min]], np.int32), (0,0,255))
                 cv2.putText(im, VID_CLASSES_name[j-1]+':'+str(np.around(scores,decimals=2)),
                             (x_min+10, y_min+18), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=(255,255,255), thickness=1)
-    return im, state
+    return im, state, att_map
 
 
 if __name__ == '__main__':
@@ -125,21 +129,24 @@ if __name__ == '__main__':
     mean = (104, 117, 123)
     ssd_dim = args.ssd_dim
 
-    if args.model_dir == '../weights/ssd300_VIDDET':
-        trained_model = os.path.join(args.model_dir, args.model_dir.split('/')[-1] + '_' + args.literation + '.pth')
+    if args.model_dir in ['../weights/ssd300_VIDDET', '../weights/ssd300_VIDDET_186', '../weights/attssd300_VIDDET_512_atthalf']:
+        trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation + '.pth')
     else:
         trained_model = os.path.join(args.model_dir,
                                      args.model_name + '_' + 'seq' + args.dataset_name + '_' + args.literation + '.pth') \
-            if args.tssd in ['lstm', 'tblstm'] else os.path.join(args.model_dir,
+            if args.tssd in ['lstm', 'tblstm', 'outlstm'] else os.path.join(args.model_dir,
                                                        args.model_name + '_' + args.dataset_name + '_' + args.literation + '.pth')
 
     print('loading model!')
     net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
                     top_k = args.top_k,
                     thresh = args.confidence_threshold,
-                    nms_thresh = args.nms_threshold)
+                    nms_thresh = args.nms_threshold,
+                    attention=args.attention)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
+    att_criterion = AttentionLoss(args.ssd_dim)
+
     print('Finished loading model!')
     if args.cuda:
         net = net.cuda()
@@ -150,7 +157,7 @@ if __name__ == '__main__':
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
-    state = [None]*6 if args.tssd in ['lstm', 'tblstm'] else None
+    state = [None]*6 if args.tssd in ['lstm', 'tblstm', 'outlstm'] else None
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:
@@ -158,7 +165,11 @@ if __name__ == '__main__':
         # if args.tssd == 'ssd':
         #     im_detect = test_net(net, frame, w, h, thresh=args.confidence_threshold, tim=tim)
         # else:
-        im_detect, state = test_net(net, frame, w, h, state=state, thresh=args.confidence_threshold, tim=tim)
+        im_detect, state, att_map = test_net(net, frame, w, h, state=state, thresh=args.confidence_threshold, tim=tim)
+        _, up_attmap = att_criterion(att_map)
+        att_target = cv2.resize(up_attmap[0][0].cpu().data.numpy().transpose(1,2,0), (w,h))
+        # up_attmap_np = up_attmap.cpu().data.
+        cv2.imshow('mask', att_target)
         cv2.imshow('frame', im_detect)
         cv2.waitKey(1)
     cap.release()
