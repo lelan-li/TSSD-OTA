@@ -297,10 +297,10 @@ class VOCDetection(data.Dataset):
 
             maskroi = np.zeros([img.shape[0], img.shape[1]])
             for box in list(boxes):
-                box[0] *= img.shape[0]
-                box[1] *= img.shape[1]
-                box[2] *= img.shape[0]
-                box[3] *= img.shape[1]
+                box[0] *= img.shape[1]
+                box[1] *= img.shape[0]
+                box[2] *= img.shape[1]
+                box[3] *= img.shape[0]
                 pts = np.array([[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]], np.int32)
                 maskroi = cv2.fillPoly(maskroi, [pts], 1)
             maskroi_list.append(np.expand_dims(maskroi, axis=0))
@@ -337,10 +337,10 @@ class VOCDetection(data.Dataset):
             target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
             maskroi = np.zeros([img.shape[0], img.shape[1]])
             for box in list(boxes):
-                box[0] *= img.shape[0]
-                box[1] *= img.shape[1]
-                box[2] *= img.shape[0]
-                box[3] *= img.shape[1]
+                box[0] *= img.shape[1]
+                box[1] *= img.shape[0]
+                box[2] *= img.shape[1]
+                box[3] *= img.shape[0]
                 pts = np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]], np.int32)
                 maskroi = cv2.fillPoly(maskroi, [pts], 1)
                 # cv2.imshow('mask',cv2.resize(maskori, (700,700)))

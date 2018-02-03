@@ -1,4 +1,4 @@
-type='tblstm'
+type='tbedlstm'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../train.py \
@@ -6,18 +6,18 @@ then
     --momentum 0.9 \
     --visdom 'yes' \
     --send_images_to_visdom 'yes' \
-    --save_folder '../weights/attssd300_VIDDET_512_att02/' \
+    --save_folder '../weights/attssd300_VIDDET_512/' \
     --step_list 20000 40000 \
     --batch_size 64 \
     --ssd_dim 300 \
-    --gpu_ids '3,2' \
+    --gpu_ids '0,1' \
     --dataset_name 'VIDDET' \
     --set_file_name 'train_VID_DET' \
     --augm_type 'ssd' \
     --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
     --tssd 'ssd' \
     --attention 'yes' \
-    --freeze 0
+    --freeze 1
 #    --resume_from_ssd '../weights/ssd300_VIDDET/ssd300_VIDDET_160000.pth'
 elif [ $type = 'lstm' ]
 then
@@ -65,8 +65,8 @@ then
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom true \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf/' \
-    --step_list 20000 30000 40000 \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttEDTBLstm_Drop2Clip5_FixVggExtraLocConf/' \
+    --step_list 30000 40000 50000 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
@@ -86,9 +86,9 @@ then
     --lr 0.0001 \
     --momentum 0.9 \
     --visdom true \
-    --send_images_to_visdom tru \
-    --save_folder '../weights/tssd300_VID2017_b8s8_DSkipTBDoLstm_RMSPw_DropInOut2Clip5_FixVggExtraPreLocConf160000/' \
-    --step_list 20000 30000 40000 \
+    --send_images_to_visdom true \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipTBDoLstm_Drop2Clip5_FixVggExtraPreLocConf/' \
+    --step_list 30000 40000 50000 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
@@ -97,8 +97,9 @@ then
     --augm_type 'base' \
     --set_file_name 'train_video_remove_no_object' \
     --tssd 'tbedlstm' \
-    --resume_from_ssd '../weights/ssd300_VIDDET/ssd300_VIDDET_160000_512.pth' \
-    --freeze 'yes'
+    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
+    --freeze '2' \
+    --attention 'yes'
 elif [ $type = 'gru' ]
 then
     pythonc3 ../train.py \

@@ -5,9 +5,11 @@ import os.path
 home = os.path.expanduser("~")
 vocdir = os.path.join(home,"data/VOCdevkit/")
 viddir = os.path.join(home,"data/ILSVRC/")
+motdetdir = os.path.join(home,"data/MOT/MOT17Det/")
 # note: if you used our download scripts, this should be right
 VOCroot = vocdir # path to VOCdevkit root dir
 VIDroot = viddir
+MOT17Detroot = motdetdir
 # default batch size
 BATCHES = 32
 # data reshuffled at every epoch

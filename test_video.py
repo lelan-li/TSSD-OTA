@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.autograd import Variable
+import torch.nn.functional as F
 from data import VOCroot, VIDroot
 # from data import VOC_CLASSES as labelmap
 import torch.utils.data as data
@@ -101,6 +102,7 @@ def test_net(net, im, w, h, state=None, thresh=0.5, tim=None):
         detections = detections.data
         t_diff = tim.toc(average=True)
         print(np.around(t_diff, decimals=4))
+    out = list()
     for j in range(1, detections.size(1)):
         for k in range(detections.size(2)):
             dets = detections[0, j, k, :]
@@ -114,15 +116,32 @@ def test_net(net, im, w, h, state=None, thresh=0.5, tim=None):
             y_min = int(boxes[1] * h)
             y_max = int(boxes[3] * h)
 
-            scores = dets[0]
-            if scores > thresh:
-                cv2.rectangle(im, (x_min, y_min), (x_max, y_max), (0,0,255), thickness=2)
-                # cv2.rectangle(im, (x_min, y_min-30), (x_max, y_min), (0,0,255), thickness=2)
-                cv2.fillConvexPoly(im, np.array([[x_min, y_min], [x_min, y_min+30], [x_max-30, y_min+30],[x_max-30, y_min]], np.int32), (0,0,255))
-                cv2.putText(im, VID_CLASSES_name[j-1]+':'+str(np.around(scores,decimals=2)),
-                            (x_min+10, y_min+18), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=(255,255,255), thickness=1)
-    return im, state, att_map
+            score = dets[0]
+            if score > thresh:
+                out.append([x_min, y_min, x_max, y_max, j-1, score])
 
+    return tuple(out), state, att_map
+
+def att_match(att_roi_tuple, pre_att_roi_tuple, pooling_size=30):
+    match_list = [None] * len(att_roi_tuple)
+    if not pre_att_roi_tuple:
+        return match_list
+    else:
+        xycls_dis = np.zeros(len(att_roi_tuple), len(pre_att_roi_tuple))
+        for num, obj in enumerate(att_roi_tuple):
+            obj[0] = [F.upsample(roi, (pooling_size,pooling_size), mode='bilinear') for roi in obj[0]]
+            obj_x_min, obj_y_min, obj_x_max, obj_y_max, obj_cls = obj[1:]
+            for pre_num, pre_obj in enumerate(pre_att_roi_tuple):
+                if pre_num == 0:
+                    pre_obj[0] = [F.upsample(preroi, (pooling_size,pooling_size)) for preroi in pre_att_roi]
+                preobj_x_min, preobj_y_min, preobj_x_max, preobj_y_max, preobj_cls = pre_obj[1:]
+                xycls_dis[num, pre_num] = (obj_x_min - preobj_x_min) + \
+                                          (obj_y_min - preobj_y_min) + \
+                                          (obj_x_max - preobj_x_max) + \
+                                          (obj_y_max - preobj_y_max) + \
+                                          (1,0)[obj_cls==preobj_cls]
+
+        return match_list
 
 if __name__ == '__main__':
 
@@ -145,9 +164,8 @@ if __name__ == '__main__':
                     attention=args.attention)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
-    att_criterion = AttentionLoss(args.ssd_dim)
 
-    print('Finished loading model!')
+    print('Finished loading model!', args.model_dir, args.literation)
     if args.cuda:
         net = net.cuda()
         cudnn.benchmark = True
@@ -156,8 +174,11 @@ if __name__ == '__main__':
     cap = cv2.VideoCapture(args.video_name)
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    att_criterion = AttentionLoss((h,w))
 
     state = [None]*6 if args.tssd in ['lstm', 'tblstm', 'outlstm'] else None
+    pre_att_roi = list()
+    id_pre_cls = [0] * len(VID_CLASSES_name)
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:
@@ -165,12 +186,35 @@ if __name__ == '__main__':
         # if args.tssd == 'ssd':
         #     im_detect = test_net(net, frame, w, h, thresh=args.confidence_threshold, tim=tim)
         # else:
-        im_detect, state, att_map = test_net(net, frame, w, h, state=state, thresh=args.confidence_threshold, tim=tim)
-        _, up_attmap = att_criterion(att_map)
-        att_target = cv2.resize(up_attmap[0][0].cpu().data.numpy().transpose(1,2,0), (w,h))
+        objects, state, att_map = test_net(net, frame, w, h, state=state, thresh=args.confidence_threshold, tim=tim)
+        _, up_attmap = att_criterion(att_map) # scale, batch, tensor(1,h,w)
         # up_attmap_np = up_attmap.cpu().data.
+        att_target = up_attmap[5][0].cpu().data.numpy().transpose(1, 2, 0)
+        # print(up_attmap[0][0])
+        att_roi = list()
+        for object in objects:
+            x_min, y_min, x_max, y_max, cls, score = object
+            roi = frame[y_min:y_max,x_min:x_max]
+            att_roi_obj=[None]*len(up_attmap)
+            for scale in up_attmap:
+                att_roi_obj[scale] = up_attmap[scale][0][:,y_min:y_max,x_min:x_max]
+            att_roi.append([att_roi_obj,x_min/w,y_min/h,x_max/w,y_max/h,cls]) # [object[[roi], x, y, x, y, cls]]
+
+        match_list = att_match(att_roi, pre_att_roi)
+        pre_att_roi = att_roi
+
+        ## Draw
+        for object in objects:
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 0, 255), thickness=2)
+            # cv2.rectangle(im, (x_min, y_min-30), (x_max, y_min), (0,0,255), thickness=2)
+            cv2.fillConvexPoly(frame, np.array(
+                [[x_min, y_min], [x_min, y_min + 30], [x_max - 30, y_min + 30], [x_max - 30, y_min]], np.int32),
+                               (0, 0, 255))
+            cv2.putText(frame, VID_CLASSES_name[cls] + ':' + str(np.around(score, decimals=2)),
+                        (x_min + 10, y_min + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=(255, 255, 255), thickness=1)
+            # cv2.imshow('roi', att_roi.cpu().data.numpy().transpose(1, 2, 0))
         cv2.imshow('mask', att_target)
-        cv2.imshow('frame', im_detect)
+        cv2.imshow('frame', frame)
         cv2.waitKey(1)
     cap.release()
     cv2.destroyAllWindows()

@@ -7,7 +7,7 @@ import torch.nn.init as init
 import argparse
 from torch.autograd import Variable
 import torch.utils.data as data
-from data import v2, v1, AnnotationTransform, BaseTransform, VOCDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, VOC_CLASSES, VID_CLASSES
+from data import v2, v1, AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, VOC_CLASSES, VID_CLASSES
 from utils.augmentations import SSDAugmentation, seqSSDAugmentation
 from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss
 from ssd import build_ssd
@@ -23,7 +23,7 @@ parser.add_argument('--basenet', default='vgg16_reducedfc_512.pth', help='pretra
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
 parser.add_argument('--batch_size', default=2, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint')
-parser.add_argument('--resume_from_ssd', default='./weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth', type=str, help='Resume vgg and extras from ssd checkpoint')
+parser.add_argument('--resume_from_ssd', default='ssd', type=str, help='Resume vgg and extras from ssd checkpoint')
 parser.add_argument('--freeze', default=0, type=int, help='Freeze, 1. vgg, extras; 2. vgg, extras, conf, loc')
 parser.add_argument('--num_workers', default=1, type=int, help='Number of workers used in dataloading')
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
@@ -32,17 +32,17 @@ parser.add_argument('--cuda', default=True, type=str2bool, help='Use cuda to tra
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='Weight decay for SGD')
-parser.add_argument('--gamma', default=0.1, type=float, help='Gamma update for SGD')
+parser.add_argument('--gamma', default=3, type=float, help='Gamma update for SGD')
 parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss at each iteration')
 parser.add_argument('--visdom', default=True, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='./weights/test/', help='Location to save checkpoint models')
-parser.add_argument('--dataset_name', default='seqVID2017', help='Which dataset')
+parser.add_argument('--dataset_name', default='MOT17Det', help='Which dataset')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
-parser.add_argument('--gpu_ids', default='1,0', type=str, help='gpu number')
-parser.add_argument('--augm_type', default='seqssd', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='tblstm', type=str, help='ssd or tssd')
+parser.add_argument('--gpu_ids', default='3', type=str, help='gpu number')
+parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
+parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=4, type=int, help='Batch size for training')
 parser.add_argument('--set_file_name',  default='train_video_remove_no_object', type=str, help='train set name')
 parser.add_argument('--attention', default=True, type=str2bool, help='attention')
@@ -73,13 +73,21 @@ elif args.dataset_name=='VID2017':
     train_sets = 'train'
     num_classes = len(VID_CLASSES) + 1
     data_root = VIDroot
+elif args.dataset_name=='MOT17Det':
+    train_sets = 'train'
+    num_classes = 2
+    data_root = MOT17Detroot
+elif args.dataset_name=='seqMOT17Det':
+    train_sets = 'train_video'
+    num_classes = 2
+    data_root = MOT17Detroot
 else:
     train_sets = 'train_remove_noobject'
     num_classes = len(VID_CLASSES) + 1
     data_root = VIDroot
 
 set_filename = args.set_file_name
-collate_fn = seq_detection_collate if args.dataset_name=='seqVID2017' else detection_collate
+collate_fn = seq_detection_collate if args.dataset_name[:3]=='seq' else detection_collate
 
 ssd_dim = args.ssd_dim  # only support 300 now
 means = (104, 117, 123)
@@ -244,7 +252,11 @@ def train():
     net.train()
     epoch = 0
     print('Loading Dataset...')
-    dataset = VOCDetection(data_root, train_sets, data_transform(
+    if args.dataset_name in ['MOT17Det', 'seqMOT17Det']:
+        dataset = MOTDetection(data_root, train_sets, data_transform(
+            ssd_dim, means),dataset_name=args.dataset_name, seq_len=args.seq_len)
+    else:
+        dataset = VOCDetection(data_root, train_sets, data_transform(
         ssd_dim, means), AnnotationTransform(dataset_name=args.dataset_name),
                            dataset_name=args.dataset_name, set_file_name=set_filename, seq_len=args.seq_len)
 

@@ -241,7 +241,7 @@ class EDConvLSTMCell(nn.Module):
         en_prev_cell, en_prev_hidden, de_prev_cell, de_prev_hidden = prev_state
 
         # encode data size is [batch, channel, height, width]
-        en_stacked_inputs = torch.cat((input_, en_prev_hidden), 1)
+        en_stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), en_prev_hidden), 1)
         en_gates = self.en_Gates(en_stacked_inputs)
 
         # chunk across channel dimension
@@ -260,7 +260,7 @@ class EDConvLSTMCell(nn.Module):
         en_hidden = en_out_gate * F.tanh(en_cell)
 
         # decode
-        de_stacked_inputs = torch.cat((en_hidden, de_prev_hidden), 1)
+        de_stacked_inputs = torch.cat((F.dropout(en_hidden, p=0.2,training=(False,True)[self.phase=='train']), de_prev_hidden), 1)
         de_gates = self.de_Gates(de_stacked_inputs)
         de_in_gate, de_remember_gate, de_out_gate, de_cell_gate = de_gates.chunk(4, 1)
         de_in_gate = F.sigmoid(de_in_gate)
@@ -271,6 +271,19 @@ class EDConvLSTMCell(nn.Module):
         de_hidden = de_out_gate * F.tanh(de_cell)
 
         return en_cell, en_hidden, de_cell, de_hidden
+
+    def init_state(self, input_):
+        batch_size = input_.data.size()[0]
+        spatial_size = input_.data.size()[2:]
+        en_state_size = [batch_size, self.en_hidden_size] + list(spatial_size)
+        de_state_size = [batch_size, self.de_hidden_size] + list(spatial_size)
+        state = (
+            Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase == 'test'])
+        )
+        return state
 
 class ConvGRUCell(nn.Module):
     def __init__(self, input_size, hidden_size, kernel_size=3, cuda_flag=True, phase='train'):
@@ -519,6 +532,8 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
                                   * num_classes, kernel_size=3, padding=1)]
     if lstm in ['tblstm']:
         rnn_layer = [ConvLSTMCell(512,512,phase=phase), ConvLSTMCell(256,256,phase=phase)]
+    elif lstm in ['tbedlstm']:
+            rnn_layer = [EDConvLSTMCell(512, [512,512], phase=phase), EDConvLSTMCell(256, [256,256], phase=phase)]
     return vgg, extra_layers, (loc_layers, conf_layers, rnn_layer)
 
 

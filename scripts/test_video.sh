@@ -52,7 +52,7 @@ then
     pythonc3 ../test_video.py \
     --model_dir '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_RMSPw_Clip5_FixVggExtraLocConf5000' \
     --model_name ssd300 \
-    --literation 10000 \
+    --literation 20000 \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
     --top_k $top_k \
