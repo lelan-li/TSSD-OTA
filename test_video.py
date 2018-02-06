@@ -20,6 +20,7 @@ import time
 import argparse
 import numpy as np
 import cv2
+import matplotlib
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -43,6 +44,7 @@ parser.add_argument('--video_name', default='/home/sean/data/ILSVRC/Data/VID/sni
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id',  default='1', type=str, help='gpu_id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
+parser.add_argument('--save_dir',  default=None, type=str, help='save dir')
 
 
 args = parser.parse_args()
@@ -101,7 +103,7 @@ def test_net(net, im, w, h, state=None, thresh=0.5, tim=None):
         detections, state, att_map = net(x, state)
         detections = detections.data
         t_diff = tim.toc(average=True)
-        print(np.around(t_diff, decimals=4))
+        # print(np.around(t_diff, decimals=4))
     out = list()
     for j in range(1, detections.size(1)):
         for k in range(detections.size(2)):
@@ -148,7 +150,7 @@ if __name__ == '__main__':
     mean = (104, 117, 123)
     ssd_dim = args.ssd_dim
 
-    if args.model_dir in ['../weights/ssd300_VIDDET', '../weights/ssd300_VIDDET_186', '../weights/attssd300_VIDDET_512_atthalf']:
+    if args.model_dir in ['../weights/ssd300_VIDDET', '../weights/ssd300_VIDDET_186', '../weights/ssd300_VIDDET_512', '../weights/attssd300_VIDDET_512']:
         trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation + '.pth')
     else:
         trained_model = os.path.join(args.model_dir,
@@ -171,11 +173,14 @@ if __name__ == '__main__':
         cudnn.benchmark = True
     tim = Timer()
 
+    frame_num = 0
     cap = cv2.VideoCapture(args.video_name)
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    att_criterion = AttentionLoss((h,w))
+    print(w,h)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
 
+    att_criterion = AttentionLoss((h,w))
     state = [None]*6 if args.tssd in ['lstm', 'tblstm', 'outlstm'] else None
     pre_att_roi = list()
     id_pre_cls = [0] * len(VID_CLASSES_name)
@@ -183,38 +188,68 @@ if __name__ == '__main__':
         ret, frame = cap.read()
         if not ret:
             break
+        frame_draw = frame.copy()
+        frame_num += 1
         # if args.tssd == 'ssd':
         #     im_detect = test_net(net, frame, w, h, thresh=args.confidence_threshold, tim=tim)
         # else:
         objects, state, att_map = test_net(net, frame, w, h, state=state, thresh=args.confidence_threshold, tim=tim)
-        _, up_attmap = att_criterion(att_map) # scale, batch, tensor(1,h,w)
-        # up_attmap_np = up_attmap.cpu().data.
-        att_target = up_attmap[5][0].cpu().data.numpy().transpose(1, 2, 0)
+        if args.attention:
+            _, up_attmap = att_criterion(att_map) # scale, batch, tensor(1,h,w)
+            att_target = up_attmap[0][0].cpu().data.numpy().transpose(1, 2, 0)
         # print(up_attmap[0][0])
         att_roi = list()
+        # if objects:
         for object in objects:
+                # x_min, y_min, x_max, y_max, cls, score = object
+                # if frame_num in [45, 55, 65]:
+                #     print(x_min,y_min,x_max,y_max)
+            # roi = frame[y_min:y_max,x_min:x_max]
+            # att_roi_obj=[None]*len(up_attmap)
+            # for scale in up_attmap:
+                # att_roi_obj[scale] = up_attmap[scale][0][:,y_min:y_max,x_min:x_max]
+            # att_roi.append([att_roi_obj,x_min/w,y_min/h,x_max/w,y_max/h,cls]) # [object[[roi], x, y, x, y, cls]]
+
+        # match_list = att_match(att_roi, pre_att_roi)
+        # pre_att_roi = att_roi
+
+        # Draw
+        # for object in objects:
+                # if frame_num==55:
+                #     color = (180,150,0)
+                # else:
+            color = (0,0,255)
             x_min, y_min, x_max, y_max, cls, score = object
-            roi = frame[y_min:y_max,x_min:x_max]
-            att_roi_obj=[None]*len(up_attmap)
-            for scale in up_attmap:
-                att_roi_obj[scale] = up_attmap[scale][0][:,y_min:y_max,x_min:x_max]
-            att_roi.append([att_roi_obj,x_min/w,y_min/h,x_max/w,y_max/h,cls]) # [object[[roi], x, y, x, y, cls]]
+            cv2.rectangle(frame_draw, (x_min, y_min), (x_max, y_max), color, thickness=2)
+            cv2.fillConvexPoly(frame_draw, np.array(
+            [[x_min-1, y_min], [x_min-1, y_min - 50], [x_max+1 , y_min - 50], [x_max+1, y_min]], np.int32),
+                               color)
+            cv2.putText(frame_draw, VID_CLASSES_name[cls] + str(np.around(score, decimals=2)),
+                    (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 1.4, color=(255, 255, 255), thickness=2)
+            print(str(frame_num)+':'+str(np.around(score, decimals=2))+',')
+        # cv2.imshow('roi', att_roi.cpu().data.numpy().transpose(1, 2, 0))
+        # cv2.imshow('mask', att_target)
+        # else:
+        #     print(frame_num)
+        cv2.imshow('frame', frame_draw)
+        ch = cv2.waitKey(1)
+        if ch == 32:
+        # if frame_num in [1, 20]:
+            while 1:
+                in_ch = cv2.waitKey(10)
+                if in_ch == 115: # 's'
+                    if args.save_dir:
+                        print('save: ', frame_num)
+                        # if args.tssd == 'ssd':
+                        #     torch.save((objects, up_attmap), os.path.join(args.save_dir, 'ssd_%s.pkl' % str(frame_num)))
+                        # else:
+                        print(args.save_dir)
+                        cv2.imwrite(os.path.join(args.save_dir, '%s.jpg' % str(frame_num)), frame)
+                        torch.save((objects, up_attmap), os.path.join(args.save_dir, '%s.pkl' % str(frame_num)))
+                        # cv2.imwrite('./11.jpg', frame)
+                elif in_ch == 32:
+                    break
 
-        match_list = att_match(att_roi, pre_att_roi)
-        pre_att_roi = att_roi
 
-        ## Draw
-        for object in objects:
-            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 0, 255), thickness=2)
-            # cv2.rectangle(im, (x_min, y_min-30), (x_max, y_min), (0,0,255), thickness=2)
-            cv2.fillConvexPoly(frame, np.array(
-                [[x_min, y_min], [x_min, y_min + 30], [x_max - 30, y_min + 30], [x_max - 30, y_min]], np.int32),
-                               (0, 0, 255))
-            cv2.putText(frame, VID_CLASSES_name[cls] + ':' + str(np.around(score, decimals=2)),
-                        (x_min + 10, y_min + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=(255, 255, 255), thickness=1)
-            # cv2.imshow('roi', att_roi.cpu().data.numpy().transpose(1, 2, 0))
-        cv2.imshow('mask', att_target)
-        cv2.imshow('frame', frame)
-        cv2.waitKey(1)
     cap.release()
     cv2.destroyAllWindows()

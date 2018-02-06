@@ -320,7 +320,10 @@ class VOCDetection(data.Dataset):
         if self.target_transform is not None:
             target = self.target_transform(target, width, height, img_id)
             if len(target) == 0:
-                return img, target, height, width, maskroi
+                # target = np.array(target)
+                img,_,_ = self.transform(img)
+                img = img[:, :, (2, 1, 0)]
+                return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
             # box = target[0]
             # x_min, y_min, x_max, y_max, _ = box
             # print(x_min, y_min, x_max, y_max)

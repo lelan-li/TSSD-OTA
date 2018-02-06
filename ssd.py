@@ -45,7 +45,7 @@ class SSD(nn.Module):
             self.attention = nn.ModuleList([ConvAttention(512),ConvAttention(256)])
                                             # ConvAttention(512),ConvAttention(256),
                                             # ConvAttention(256),ConvAttention(256)])
-
+            print(self.attention)
         if phase == 'test':
             self.softmax = nn.Softmax()
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
@@ -343,6 +343,7 @@ class TSSD(nn.Module):
             self.attention = nn.ModuleList([ConvAttention(in_channel*2), ConvAttention(in_channel)])
                                             # ConvAttention(in_channel*2), ConvAttention(in_channel),
                                             # ConvAttention(in_channel), ConvAttention(in_channel)])
+            print(self.attention)
 
         if phase == 'test':
             self.softmax = nn.Softmax()
@@ -490,8 +491,8 @@ def vgg(cfg, i, batch_norm=False):
             in_channels = v
     pool5 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
     conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)
-    # conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
     conv7 = nn.Conv2d(1024, 512, kernel_size=1)
+    # conv7 = nn.Conv2d(1024, 512, kernel_size=1)
     layers += [pool5, conv6,
                nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
     return layers

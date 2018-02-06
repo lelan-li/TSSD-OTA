@@ -419,8 +419,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     pre_video_name = None
     for i in range(num_images):
         im, gt, h, w, _ = dataset.pull_item(i)
-        if len(gt) == 0:
-            continue
+        # if len(gt) == 0:
+        #     continue
         img_id = dataset.pull_img_id(i)
         # print(img_id[1])
         video_name = img_id[1].split('/')[0]
@@ -506,3 +506,5 @@ if __name__ == '__main__':
         out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
         print('Without detection', out_dir)
         do_python_eval(out_dir)
+    print('Finished!', args.model_dir, args.literation)
+

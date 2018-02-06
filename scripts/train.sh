@@ -1,4 +1,4 @@
-type='tbedlstm'
+type='tblstm'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../train.py \
@@ -65,8 +65,8 @@ then
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom true \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttEDTBLstm_Drop2Clip5_FixVggExtraLocConf/' \
-    --step_list 30000 40000 50000 \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf30000/' \
+    --step_list 3000 40000 50000 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
@@ -76,9 +76,10 @@ then
     --set_file_name 'train_video_remove_no_object' \
     --tssd 'tblstm' \
     --freeze 2 \
-    --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_RMSPw_Clip5_FixVggExtraLocConf5000/ssd300_seqVID2017_15000.pth' \
-    --start_iter 15000
-#    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
+    --attention 'yes' \
+    --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf/ssd300_seqVID2017_30000.pth'
+#    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
+#    --start_iter 15000
 
 elif [ $type = 'tbedlstm' ]
 then

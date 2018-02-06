@@ -125,3 +125,5 @@ data/datasets/
 data/ssd_dataloader.py
 utils/*.txt
 select_frames.py
+res/
+Intro/
