@@ -65,7 +65,7 @@ then
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom true \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf30000/' \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_PreVggExtraLocConf/' \
     --step_list 3000 40000 50000 \
     --batch_size 8 \
     --seq_len 8 \
@@ -75,10 +75,10 @@ then
     --augm_type 'base' \
     --set_file_name 'train_video_remove_no_object' \
     --tssd 'tblstm' \
-    --freeze 2 \
+    --freeze 0 \
     --attention 'yes' \
-    --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf/ssd300_seqVID2017_30000.pth'
-#    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
+    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
+    #--resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf/ssd300_seqVID2017_30000.pth'
 #    --start_iter 15000
 
 elif [ $type = 'tbedlstm' ]

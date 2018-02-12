@@ -4,7 +4,7 @@ nms_thresh=0.45
 top_k=200
 set_file_name='val'
 detection='yes'
-gpu_id='3'
+gpu_id='1'
 attention='yes'
 if [ $type = 'ssd' ]
 then
@@ -44,7 +44,7 @@ then
     pythonc3 ../eval.py \
     --model_dir '../weights/tssd300_VID2017_b4s16_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf' \
     --model_name 'ssd300' \
-    --literation 35000 \
+    --literation 45000 \
     --save_folder '../eval' \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \

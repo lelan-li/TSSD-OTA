@@ -222,10 +222,25 @@ else:
 # base_params = filter(lambda p: id(p) not in att_params, net.module.parameters())
 
 if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm', 'tbedlstm', 'outlstm']:
-    optimizer = optim.SGD(net.module.attention.parameters()
-                               # [{'params': net.module.loc.parameters()},
-                               # {'params': net.module.conf.parameters()}]
-                               # {'params': net.module.loc.parameters()}]
+    if args.freeze == 0:
+        print('train VGG, Extras, Loc, Conf, Attention, LSTM')
+        optimizer = optim.SGD(#net.module.attention.parameters()
+                                [{'params': net.module.loc.parameters()},
+                                {'params': net.module.conf.parameters()},
+                                {'params': net.module.attention.parameters()},
+                                {'params': net.module.vgg.parameters()},
+                                {'params': net.module.extras.parameters()}]
+                              ,lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
+    elif args.freeze == 1:
+        print('train Loc, Conf, Attention, LSTM')
+        optimizer = optim.SGD(#net.module.attention.parameters()
+                                [{'params': net.module.loc.parameters()},
+                                {'params': net.module.conf.parameters()},
+                                {'params': net.module.attention.parameters()}]
+                              ,lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
+    elif args.freeze == 2:
+        print('train Attention, LSTM')
+        optimizer = optim.SGD(net.module.attention.parameters()
                               ,lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
     optimizer_rnn = optim.RMSprop(net.module.rnn.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
