@@ -434,7 +434,9 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if args.cuda:
             x = x.cuda()
         if tssd == 'ssd':
+            _t['im_detect'].tic()
             detections,_ = net(x)
+            detect_time = _t['im_detect'].toc(average=False)
             detections = detections.data
         else:
             _t['im_detect'].tic()

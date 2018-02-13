@@ -1,4 +1,4 @@
-type='tblstm'
+type='ssd'
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
@@ -11,7 +11,7 @@ then
     pythonc3 ../eval.py \
     --model_dir '../weights/attssd300_VIDDET_512' \
     --model_name ssd300 \
-    --literation 10000 \
+    --literation 5000 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
