@@ -166,7 +166,7 @@ def get_voc_results_file_template(image_set, cls):
 
 def write_voc_results_file(all_boxes, dataset):
     for cls_ind, cls in enumerate(labelmap):
-        print('Writing {:s} VOC results file'.format(cls))
+        # print('Writing {:s} VOC results file'.format(cls))
         filename = get_voc_results_file_template(set_type, cls)
         with open(filename, 'wt') as f:
             for im_ind, index in enumerate(dataset.ids):
@@ -413,6 +413,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
+    all_time = 0.
     output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
@@ -432,14 +433,16 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()
-        _t['im_detect'].tic()
         if tssd == 'ssd':
             detections,_ = net(x)
             detections = detections.data
         else:
+            _t['im_detect'].tic()
             detections, state, _ = net(x, state)
+            detect_time = _t['im_detect'].toc(average=False)
             detections = detections.data
-        detect_time = _t['im_detect'].toc(average=False)
+        if i>10:
+            all_time += detect_time
 
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
@@ -460,7 +463,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if i % (int(num_images/10)) == 0:
             print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
-
+    print('all time:', all_time)
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 

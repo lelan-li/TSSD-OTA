@@ -42,9 +42,9 @@ then
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/tssd300_VID2017_b4s16_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf' \
+    --model_dir '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_PreVggExtraLocConf' \
     --model_name 'ssd300' \
-    --literation 45000 \
+    --literation 15000 \
     --save_folder '../eval' \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
