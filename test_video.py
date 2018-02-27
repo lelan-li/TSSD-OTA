@@ -233,19 +233,18 @@ if __name__ == '__main__':
         #     print(frame_num)
         cv2.imshow('frame', frame_draw)
         ch = cv2.waitKey(1)
-        if ch == 32:
-        # if frame_num in [1, 20]:
+        # if ch == 32:
+        if frame_num in [1, 20]:
             while 1:
                 in_ch = cv2.waitKey(10)
                 if in_ch == 115: # 's'
                     if args.save_dir:
                         print('save: ', frame_num)
-                        # if args.tssd == 'ssd':
-                        #     torch.save((objects, up_attmap), os.path.join(args.save_dir, 'ssd_%s.pkl' % str(frame_num)))
-                        # else:
-                        print(args.save_dir)
-                        cv2.imwrite(os.path.join(args.save_dir, '%s.jpg' % str(frame_num)), frame)
-                        torch.save((objects, up_attmap), os.path.join(args.save_dir, '%s.pkl' % str(frame_num)))
+                        if args.tssd == 'ssd':
+                            torch.save((objects, up_attmap), os.path.join(args.save_dir, 'ssd_%s.pkl' % str(frame_num)))
+                        else:
+                            cv2.imwrite(os.path.join(args.save_dir, '%s.jpg' % str(frame_num)), frame)
+                            torch.save((objects, up_attmap), os.path.join(args.save_dir, '%s.pkl' % str(frame_num)))
                         # cv2.imwrite('./11.jpg', frame)
                 elif in_ch == 32:
                     break

@@ -1,8 +1,12 @@
 import numpy as np
+import matplotlib.pyplot
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.patches as patches
 import cv2
+
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 font_label = {'family' : 'Arial',
         'color'  : 'black',

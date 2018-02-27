@@ -277,7 +277,7 @@ def train():
 
     epoch_size = len(dataset) // args.batch_size
 
-    print('Training TSSD on', dataset.name, ', how many videos:', len(dataset), ', sequence length:', args.seq_len) if args.tssd in ['lstm', 'edlstm', 'outlstm'] else print('Training SSD on', dataset.name)
+    print('Training TSSD on', dataset.name, ', how many videos:', len(dataset), ', sequence length:', args.seq_len) if args.tssd in ['lstm', 'tblstm'] else print('Training SSD on', dataset.name)
     print('lr:',args.lr , 'steps:', stepvalues, 'max_liter:', max_iter)
     step_index = 0
     if args.visdom:

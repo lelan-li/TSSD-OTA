@@ -1,11 +1,11 @@
-type='tblstm'
+type='ssd'
 #video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00131000.mp4'
-video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00007010.mp4'
+video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00061000.mp4'
 
 conf_thresh=0.5
 nms_thresh=0.45
 top_k=10
-gpu_id='3'
+gpu_id='0'
 attention='yes'
 if [ $type = 'ssd' ]
 then

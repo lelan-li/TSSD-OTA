@@ -391,6 +391,8 @@ class TSSD(nn.Module):
                         # a_map.append(a(x))
                         a_feat = x*(a_map[-1])
                         rnn_state[i] = self.rnn[i//3](a_feat, rnn_state[i])
+                        # conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
+                        # loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())
                         conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
                         loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
                 else:
@@ -443,6 +445,8 @@ class TSSD(nn.Module):
                     # a_map.append(a(x))
                     a_feat = x * (a_map[-1])
                     state[i] = self.rnn[i // 3](a_feat, state[i])
+                    # conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
+                    # loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())
                     conf.append(c(state[i][-1]).permute(0, 2, 3, 1).contiguous())
                     loc.append(l(state[i][-1]).permute(0, 2, 3, 1).contiguous())
             else:
@@ -491,8 +495,8 @@ def vgg(cfg, i, batch_norm=False):
             in_channels = v
     pool5 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
     conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)
+    # conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
     conv7 = nn.Conv2d(1024, 512, kernel_size=1)
-    # conv7 = nn.Conv2d(1024, 512, kernel_size=1)
     layers += [pool5, conv6,
                nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
     return layers

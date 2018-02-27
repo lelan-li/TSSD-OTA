@@ -1,10 +1,14 @@
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.patches as patches
 import torch
 import os
 import cv2
+
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 

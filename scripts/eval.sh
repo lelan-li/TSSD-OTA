@@ -1,17 +1,17 @@
-type='ssd'
+type='tblstm'
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
 set_file_name='val'
 detection='yes'
-gpu_id='1'
+gpu_id='3'
 attention='yes'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/attssd300_VIDDET_512' \
+    --model_dir '../weights/ssd300_VIDDET' \
     --model_name ssd300 \
-    --literation 5000 \
+    --literation 150000 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
@@ -42,7 +42,7 @@ then
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_PreVggExtraLocConf' \
+    --model_dir '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf' \
     --model_name 'ssd300' \
     --literation 15000 \
     --save_folder '../eval' \

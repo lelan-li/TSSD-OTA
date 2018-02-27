@@ -1,10 +1,15 @@
 import numpy as np
 import torch
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.gridspec as gridspec
 import os
 import cv2
+
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
+
 VID_CLASSES_name =(  # always index 0
     'airplane', #1 airplane
     'antelope', #2 antelope

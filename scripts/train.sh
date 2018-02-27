@@ -39,34 +39,15 @@ then
     --resume_from_ssd '../weights/ssd300_VIDDET/ssd300_VIDDET_160000.pth' \
     --freeze 2 \
     --resume '../weights/tssd300_VID2017_b4s16_DSkipBoth6EpisBack_DropInOut2Clip5_FixVggExtraLocConf160000/ssd300_seqVID2017_10000_rnn.pth'
-elif [ $type = 'outlstm' ]
-then
-    pythonc3 ../train.py \
-    --lr 0.0001 \
-    --momentum 0.9 \
-    --visdom true \
-    --send_images_to_visdom false \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipOutReluLstm_RMSPw_Clip5_FixVggExtraLocConf10000/' \
-    --step_list 20000 30000 40000 \
-    --batch_size 8 \
-    --seq_len 8 \
-    --ssd_dim 300 \
-    --gpu_ids '2,3' \
-    --dataset_name 'seqVID2017' \
-    --augm_type 'base' \
-    --set_file_name 'train_video_remove_no_object' \
-    --tssd 'outlstm' \
-    --resume_from_ssd '../weights/ssd300_VIDDET_186/ssd300_VIDDET_10000.pth' \
-    --freeze 'yes'
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../train.py \
     --lr 0.0001 \
     --momentum 0.9 \
-    --visdom true \
+    --visdom false \
     --send_images_to_visdom true \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_PreVggExtraLocConf/' \
-    --step_list 3000 40000 50000 \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/' \
+    --step_list 30000 40010 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
@@ -75,11 +56,11 @@ then
     --augm_type 'base' \
     --set_file_name 'train_video_remove_no_object' \
     --tssd 'tblstm' \
-    --freeze 0 \
+    --freeze 1 \
     --attention 'yes' \
-    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
-    #--resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_Drop2Clip5_FixVggExtraLocConf/ssd300_seqVID2017_30000.pth'
-#    --start_iter 15000
+    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
+  #  --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_seqAugmDrop2Clip5_FixVggExtraLocConf/ssd300_seqVID2017_25000.pth' \
+   # --start_iter 25000 
 
 elif [ $type = 'tbedlstm' ]
 then
