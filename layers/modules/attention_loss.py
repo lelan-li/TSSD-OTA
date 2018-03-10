@@ -7,7 +7,10 @@ class AttentionLoss(nn.Module):
     def __init__(self, dim, cuda=True):
         super(AttentionLoss, self).__init__()
         self.criterion = nn.BCELoss().cuda() if cuda else nn.BCEWithLogitsLoss()
-        self.upsample = nn.Upsample((dim,dim), mode='bilinear')
+        if isinstance(dim, tuple):
+            self.upsample = nn.Upsample(dim, mode='bilinear')
+        else:
+            self.upsample = nn.Upsample((dim,dim), mode='bilinear')
         self.cuda = cuda
 
     def forward(self, att_map, masks=None, viz=False):

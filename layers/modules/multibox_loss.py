@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from data import v2 as cfg
-from ..box_utils import match, log_sum_exp
+from ..box_utils import match, log_sum_exp, decode, nms
+import time
 
 class MultiBoxLoss(nn.Module):
     """SSD Weighted Loss Function
@@ -119,7 +120,7 @@ class seqMultiBoxLoss(nn.Module):
 
     def __init__(self, num_classes, overlap_thresh, prior_for_matching,
                  bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
-                 use_gpu=True):
+                 use_gpu=True, refine=False, association=False, top_k=2, conf_thresh=0.1, nms_thresh=0.45):
         super(seqMultiBoxLoss, self).__init__()
         self.use_gpu = use_gpu
         self.num_classes = num_classes
@@ -131,28 +132,47 @@ class seqMultiBoxLoss(nn.Module):
         self.negpos_ratio = neg_pos
         self.neg_overlap = neg_overlap
         self.variance = cfg['variance']
+        self.refine = refine
+        self.association = association
+        if self.association:
+            self.top_k = top_k
+            self.conf_thresh = conf_thresh
+            self.nms_thresh = nms_thresh
+            self.output = torch.zeros(1, self.num_classes, self.top_k, 5)
+            self.past_score = None
 
     def forward(self, seq_predictions, targets):
         # seq_predictions: [time, batch, (loc, conf, prior)]
         # targets: [batch, time, Var(1,5)]
         seq_loss_l = 0
         seq_loss_c = 0
+        loss_association = 0
+        self.past_score = None
         for time_step, predictions in enumerate(seq_predictions):
             loc_data, conf_data, priors = predictions
             num = loc_data.size(0) # batch
-            priors = priors[:loc_data.size(1), :]
-            num_priors = (priors.size(0))
+            if priors.dim() == 3:
+                # priors = [p[:loc_data.size(1), :] for p in priors]
+                num_priors = (priors[0].size(0))
+            else:
+                priors = priors[:loc_data.size(1), :]
+                num_priors = (priors.size(0))
             num_classes = self.num_classes
 
             # match priors (default boxes) and ground truth boxes
             loc_t = torch.Tensor(num, num_priors, 4)
             conf_t = torch.LongTensor(num, num_priors)
+
             for idx in range(num):
                 truths = targets[idx][time_step][:, :-1].data
                 labels = targets[idx][time_step][:, -1].data
-                defaults = priors.data
+                if priors.dim() == 3:
+                    defaults = priors[idx].data
+                else:
+                    defaults = priors.data
                 match(self.threshold, truths, defaults, self.variance, labels,
                       loc_t, conf_t, idx)
+
             if self.use_gpu:
                 loc_t = loc_t.cuda()
                 conf_t = conf_t.cuda()
@@ -191,6 +211,7 @@ class seqMultiBoxLoss(nn.Module):
             targets_weighted = conf_t[(pos+neg).gt(0)]
             loss_c = F.cross_entropy(conf_p, targets_weighted, size_average=False)
 
+
             # conf_p_pos = conf_data[(pos_idx).gt(0)].view(-1, self.num_classes)
             # targets_pos = conf_t[pos.gt(0)]
             # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
@@ -198,15 +219,45 @@ class seqMultiBoxLoss(nn.Module):
             N = num_pos.data.sum()
             seq_loss_l += loss_l / N
             seq_loss_c += loss_c / N
-            # consistency
-            # num_pos_box = num_pos.cpu().data.numpy()
-            # num_box_batch_before = 0
-            # conf_p_pos_batch = []
-            # cls_batch = []
-            # for num_box in num_pos_box:
-            #     conf_softmax = F.softmax(conf_p_pos[num_box_batch_before:num_box_batch_before+num_box[0],:])
-            #     # conf_p_pos_batch.append(F.softmax(conf_p_pos[num_box_batch_before:num_box_batch_before+num_box[0],:]))
-            #     cls_batch.append(torch.max(conf_softmax, 1)[1])
-            #     num_box_batch_before += num_box[0]
+            ## consistency
+            if  self.association:
+                conf_data = F.softmax(conf_data.view(-1, self.num_classes)).view(num, -1, self.num_classes).data
+                self.output.zero_()
+                conf_preds = conf_data.view(num, num_priors,
+                                                self.num_classes).transpose(2, 1)
+                self.output = self.output.expand(num, self.num_classes, self.top_k, 5).contiguous()
 
-        return seq_loss_l/len(seq_predictions), seq_loss_c/len(seq_predictions)
+                # Decode predictions into bboxes.
+                for i in range(num):
+                    decoded_boxes = decode(loc_data[i].data, priors.data, self.variance)
+                    # For each class, perform nms
+                    conf_scores = conf_preds[i].clone()
+                    num_det = 0
+                    for cl in range(1, self.num_classes):
+                        c_mask = conf_scores[cl].gt(self.conf_thresh)
+                        scores = conf_scores[cl][c_mask]
+                        if scores.dim() == 0:
+                            continue
+                        l_mask = c_mask.unsqueeze(1).expand_as(decoded_boxes)
+                        boxes = decoded_boxes[l_mask].view(-1, 4)
+                        # idx of highest scoring and non-overlapping boxes per class
+                        ids, count = nms(boxes, scores, self.nms_thresh, self.top_k)
+                        self.output[i, cl, :count] = \
+                            torch.cat((scores[ids[:count]].unsqueeze(1),
+                                       boxes[ids[:count]]), 1)
+                output_score = Variable(torch.sum(self.output, dim=2, keepdim=True)[:, :, :, 0], requires_grad=False)
+                # print(output_score, time_step)
+                # time.sleep(2)
+                # flt = self.output.view(-1, 5)
+                # _, idx = flt[:, 0].sort(0)
+                # _, rank = idx.sort(0)
+                # flt[(rank >= self.top_k).unsqueeze(1).expand_as(flt)].fill_(0)
+                # flt_score = Variable(flt[:,0], requires_grad=False)
+                if self.past_score is None:
+                    self.past_score = Variable(torch.zeros(output_score.size()),requires_grad=False)
+                else:
+                    loss_association += F.smooth_l1_loss(output_score, self.past_score, size_average=False)
+                self.past_score = (self.past_score * time_step  + output_score) / (time_step+1)
+                # pass
+
+        return seq_loss_l/len(seq_predictions), seq_loss_c/len(seq_predictions), loss_association/len(seq_predictions)

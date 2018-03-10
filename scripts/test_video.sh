@@ -1,14 +1,15 @@
-type='tblstm'
-video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00121000.mp4'
+type='ssd'
+video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00011005.mp4'
+#video_name='/home/sean/data/MOT/MOT17Det/snippets/Venice-2.mp4'
 conf_thresh=0.5
 nms_thresh=0.45
-top_k=5
-gpu_id='1'
-atention='yes'
+top_k=10
+gpu_id='0'
+attention='no'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../test_video.py \
-    --model_dir '../weights/attssd300_VIDDET_512_atthalf' \
+    --model_dir '../weights/ssd300_VIDDET_512' \
     --model_name ssd300 \
     --literation 5000 \
     --confidence_threshold $conf_thresh \
@@ -18,41 +19,14 @@ then
     --video_name $video_name \
     --tssd $type \
     --gpu_id $gpu_id \
-    --attention $atention
-elif [ $type = 'lstm' ]
-then
-    pythonc3 ../test_video.py \
-    --model_dir '../weights/tssd300_VID2017_b4_s16_SkipTanhReduce_FixVggExtraPreLocConf50000' \
-    --model_name ssd300 \
-    --literation 30000 \
-    --confidence_threshold $conf_thresh \
-    --nms_threshold $nms_thresh \
-    --top_k $top_k \
-    --ssd_dim 300 \
-    --dataset_name 'VID2017' \
-    --video_name $video_name \
-    --tssd $type \
-    --gpu_id $gpu_id
-elif [ $type = 'outlstm' ]
-then
-    pythonc3 ../test_video.py \
-    --model_dir '../weights/tssd300_VID2017_b8s16_RSkipOutLstm_RMSPw_Clip5_FixVggExtraLocConf10000' \
-    --model_name ssd300 \
-    --literation 5000 \
-    --confidence_threshold $conf_thresh \
-    --nms_threshold $nms_thresh \
-    --top_k $top_k \
-    --ssd_dim 300 \
-    --dataset_name 'VID2017' \
-    --video_name $video_name \
-    --tssd $type \
-    --gpu_id $gpu_id
+    --attention 'no'
+#    --save_dir '../demo/res/whale36000'
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../test_video.py \
-    --model_dir '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_RMSPw_Clip5_FixVggExtraLocConf5000' \
+    --model_dir '../weights/tssd300_VID2017_b8s8_RSkipRes55AttTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf' \
     --model_name ssd300 \
-    --literation 10000 \
+    --literation 20000 \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
     --top_k $top_k \
@@ -61,6 +35,25 @@ then
     --video_name $video_name \
     --tssd $type \
     --gpu_id $gpu_id \
-    --attention $atention
+    --attention 'yes' \
+    --oa_ratio 0.5 0.5 \
+    --refine 'no' \
+    --save_dir '../demo/res/whale36000'
+elif [ $type = 'gru' ]
+then
+    pythonc3 ../test_video.py \
+    --model_dir '../weights/tssd300_VID2017_b8s8_DRSkipAttGru_Drop2Clip5_FixVggExtraPreLocConf' \
+    --model_name ssd300 \
+    --literation 20000 \
+    --confidence_threshold $conf_thresh \
+    --nms_threshold $nms_thresh \
+    --top_k $top_k \
+    --ssd_dim 300 \
+    --dataset_name 'VID2017' \
+    --video_name $video_name \
+    --tssd $type \
+    --gpu_id $gpu_id \
+    --attention 'yes' \
+    --refine 'no' \
+    --save_dir '../demo/res/car11005_AttGru'
 fi
-

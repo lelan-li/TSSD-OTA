@@ -55,7 +55,8 @@ parser.add_argument('--detection', default='no', type=str2bool, help='detection 
 parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id', default='2.3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
-
+parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
+parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
 
 args = parser.parse_args()
 
@@ -166,7 +167,7 @@ def get_voc_results_file_template(image_set, cls):
 
 def write_voc_results_file(all_boxes, dataset):
     for cls_ind, cls in enumerate(labelmap):
-        print('Writing {:s} VOC results file'.format(cls))
+        # print('Writing {:s} VOC results file'.format(cls))
         filename = get_voc_results_file_template(set_type, cls)
         with open(filename, 'wt') as f:
             for im_ind, index in enumerate(dataset.ids):
@@ -203,17 +204,17 @@ def do_python_eval(output_dir='output', use_07=True):
         with open(os.path.join(output_dir, cls + '_pr.pkl'), 'wb') as f:
             pickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
     print('Mean AP = {:.4f}'.format(np.mean(aps)))
-    print('~~~~~~~~')
-    print('Results:')
-    for ap in aps:
-        print('{:.3f}'.format(ap))
-    print('{:.3f}'.format(np.mean(aps)))
-    print('~~~~~~~~')
-    print('')
-    print('--------------------------------------------------------------')
-    print('Results computed with the **unofficial** Python eval code.')
-    print('Results should be very close to the official MATLAB eval code.')
-    print('--------------------------------------------------------------')
+    # print('~~~~~~~~')
+    # print('Results:')
+    # for ap in aps:
+    #     print('{:.3f}'.format(ap))
+    # print('{:.3f}'.format(np.mean(aps)))
+    # print('~~~~~~~~')
+    # print('')
+    # print('--------------------------------------------------------------')
+    # print('Results computed with the **unofficial** Python eval code.')
+    # print('Results should be very close to the official MATLAB eval code.')
+    # print('--------------------------------------------------------------')
 
 
 def voc_ap(rec, prec, use_07_metric=True):
@@ -413,14 +414,15 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
+    all_time = 0.
     output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
     pre_video_name = None
     for i in range(num_images):
         im, gt, h, w, _ = dataset.pull_item(i)
-        if len(gt) == 0:
-            continue
+        # if len(gt) == 0:
+        #     continue
         img_id = dataset.pull_img_id(i)
         # print(img_id[1])
         video_name = img_id[1].split('/')[0]
@@ -432,14 +434,18 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()
-        _t['im_detect'].tic()
         if tssd == 'ssd':
+            _t['im_detect'].tic()
             detections,_ = net(x)
+            detect_time = _t['im_detect'].toc(average=False)
             detections = detections.data
         else:
+            _t['im_detect'].tic()
             detections, state, _ = net(x, state)
+            detect_time = _t['im_detect'].toc(average=False)
             detections = detections.data
-        detect_time = _t['im_detect'].toc(average=False)
+        if i>10:
+            all_time += detect_time
 
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
@@ -460,7 +466,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if i % (int(num_images/10)) == 0:
             print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
-
+    print('all time:', all_time)
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
@@ -489,8 +495,9 @@ if __name__ == '__main__':
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
-                        attention=args.attention
-                        )
+                        attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
+                        refine=args.refine)
+
         net.load_state_dict(torch.load(trained_model))
         net.eval()
         print('Finished loading model!', args.model_dir, args.literation)
@@ -503,4 +510,8 @@ if __name__ == '__main__':
                  BaseTransform(net.size, dataset_mean), args.top_k, ssd_dim,
                  thresh=args.confidence_threshold, tssd=args.tssd)
     else:
-        do_python_eval(get_output_dir(pkl_dir, set_type))
+        out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
+        print('Without detection', out_dir)
+        do_python_eval(out_dir)
+    print('Finished!', args.model_dir, args.literation)
+

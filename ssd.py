@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from layers import *
 from data import v2
+from layers import decode
+from data import v2 as cfg
 import os
 
 class SSD(nn.Module):
@@ -45,7 +47,7 @@ class SSD(nn.Module):
             self.attention = nn.ModuleList([ConvAttention(512),ConvAttention(256)])
                                             # ConvAttention(512),ConvAttention(256),
                                             # ConvAttention(256),ConvAttention(256)])
-
+            print(self.attention)
         if phase == 'test':
             self.softmax = nn.Softmax()
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
@@ -177,6 +179,7 @@ class ConvLSTMCell(nn.Module):
         # prev_hidden_drop = F.dropout(prev_hidden, training=(False, True)[self.phase=='train'])
         # data size is [batch, channel, height, width]
         stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), prev_hidden), 1)
+        # stacked_inputs = torch.cat((input_, prev_hidden), 1)
         gates = self.Gates(stacked_inputs)
 
         # chunk across channel dimension
@@ -241,7 +244,7 @@ class EDConvLSTMCell(nn.Module):
         en_prev_cell, en_prev_hidden, de_prev_cell, de_prev_hidden = prev_state
 
         # encode data size is [batch, channel, height, width]
-        en_stacked_inputs = torch.cat((input_, en_prev_hidden), 1)
+        en_stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), en_prev_hidden), 1)
         en_gates = self.en_Gates(en_stacked_inputs)
 
         # chunk across channel dimension
@@ -260,7 +263,7 @@ class EDConvLSTMCell(nn.Module):
         en_hidden = en_out_gate * F.tanh(en_cell)
 
         # decode
-        de_stacked_inputs = torch.cat((en_hidden, de_prev_hidden), 1)
+        de_stacked_inputs = torch.cat((F.dropout(en_hidden, p=0.2,training=(False,True)[self.phase=='train']), de_prev_hidden), 1)
         de_gates = self.de_Gates(de_stacked_inputs)
         de_in_gate, de_remember_gate, de_out_gate, de_cell_gate = de_gates.chunk(4, 1)
         de_in_gate = F.sigmoid(de_in_gate)
@@ -271,6 +274,19 @@ class EDConvLSTMCell(nn.Module):
         de_hidden = de_out_gate * F.tanh(de_cell)
 
         return en_cell, en_hidden, de_cell, de_hidden
+
+    def init_state(self, input_):
+        batch_size = input_.data.size()[0]
+        spatial_size = input_.data.size()[2:]
+        en_state_size = [batch_size, self.en_hidden_size] + list(spatial_size)
+        de_state_size = [batch_size, self.de_hidden_size] + list(spatial_size)
+        state = (
+            Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase == 'test']),
+            Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase == 'test'])
+        )
+        return state
 
 class ConvGRUCell(nn.Module):
     def __init__(self, input_size, hidden_size, kernel_size=3, cuda_flag=True, phase='train'):
@@ -289,30 +305,49 @@ class ConvGRUCell(nn.Module):
         if hidden is None:
             size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
             if self.cuda_flag == True:
-                hidden = Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test']).cuda()
+                hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test']).cuda(), )
             else:
-                hidden = Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test'])
-        c1 = self.ConvGates(torch.cat((input, hidden), 1))
+                hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test']), )
+        hidden = hidden[-1]
+        c1 = self.ConvGates(torch.cat((F.dropout(input,p=0.2,training=(False,True)[self.phase=='train']), hidden), 1))
         (rt, ut) = c1.chunk(2, 1)
-        reset_gate = F.dropout(F.sigmoid(rt), p=0.2, training=(False, True)[self.phase=='train'])
-        update_gate = F.dropout(F.sigmoid(ut), p=0.2, training=(False, True)[self.phase=='train'])
+        reset_gate = F.sigmoid(rt)
+        update_gate = F.sigmoid(ut)
         gated_hidden = torch.mul(reset_gate, hidden)
         p1 = self.Conv_ct(torch.cat((input, gated_hidden), 1))
         ct = F.tanh(p1)
         next_h = torch.mul(update_gate, hidden) + (1 - update_gate) * ct
-        return next_h
+        return (next_h, )
+
+    def init_state(self, input):
+        size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
+        if self.cuda_flag == True:
+            hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase == 'test']).cuda(),)
+        else:
+            hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase == 'test']),)
+        return hidden
 
 class TSSD(nn.Module):
 
-    def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False):
+    def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
+                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False,
+                 refine=False, single_batch=4, o_ratio=0.0, a_ratio=1.0):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         # TODO: implement __call__ in PriorBox
         self.priorbox = PriorBox(v2)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
-        self.size = 300
+        self.size = size
+        self.sigle_batch = single_batch
         self.attention_flag = attention
+        # self.o_ratio = o_ratio
+        # self.a_ratio = a_ratio
+        self.refine = refine
+        if self.refine:
+            self.variance = cfg['variance']
+            # if phase == 'train':
+            #     self.priors = [self.priors,] * single_batch
 
         # SSD network
         self.vgg = nn.ModuleList(base)
@@ -330,6 +365,8 @@ class TSSD(nn.Module):
             self.attention = nn.ModuleList([ConvAttention(in_channel*2), ConvAttention(in_channel)])
                                             # ConvAttention(in_channel*2), ConvAttention(in_channel),
                                             # ConvAttention(in_channel), ConvAttention(in_channel)])
+            print(self.attention)
+            # print('oa ratio: ', self.o_ratio, self.a_ratio)
 
         if phase == 'test':
             self.softmax = nn.Softmax()
@@ -338,13 +375,15 @@ class TSSD(nn.Module):
 
     def forward(self, tx, state=None):
         if self.phase == "train":
+            if self.refine:
+                prior = self.priorbox.forward()
+                self.priors = Variable(prior.repeat(self.sigle_batch, 1,1), volatile=True)
             rnn_state = [None] * 6
-
             seq_output = list()
             seq_sources = list()
             seq_a_map = []
             for time_step in range(tx.size(1)):
-                x = tx[:,time_step,:,:]
+                x = tx[:,time_step]
                 sources = list()
                 loc = list()
                 conf = list()
@@ -375,8 +414,11 @@ class TSSD(nn.Module):
                             rnn_state[i] = self.rnn[i // 3].init_state(x)
                         a_map.append(self.attention[i//3](torch.cat((x, rnn_state[i][-1]),1)))
                         # a_map.append(a(x))
-                        a_feat = x*(a_map[-1])
+                        a_feat =  x *a_map[-1]
+                        # a_feat = self.o_ratio*x + self.a_ratio*x*(a_map[-1])
                         rnn_state[i] = self.rnn[i//3](a_feat, rnn_state[i])
+                        # conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
+                        # loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())
                         conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
                         loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
                 else:
@@ -387,11 +429,20 @@ class TSSD(nn.Module):
 
                 loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
                 conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+
+                # loc_batch_first = loc.view(loc.size(0), -1, 4)
+                # conf_batch_first = conf.view(conf.size(0), -1, self.num_classes),
+
                 output = (
                     loc.view(loc.size(0), -1, 4),
                     conf.view(conf.size(0), -1, self.num_classes),
                     self.priors,
                 )
+                # if self.refine:
+                    # for batch_idx in range(len(self.priors)):
+                        # self.priors[batch_idx] = decode(loc_batch_first[batch_idx].data,
+                        #                                 self.priors[batch_idx].data, self.variance)
+
                 seq_output.append(output)
                 seq_a_map.append(tuple(a_map))
             return tuple(seq_output), tuple(seq_a_map)
@@ -427,15 +478,18 @@ class TSSD(nn.Module):
                         state[i] = self.rnn[i // 3].init_state(x)
                     a_map.append(self.attention[i // 3](torch.cat((x, state[i][-1]), 1)))
                     # a_map.append(a(x))
-                    a_feat = x * (a_map[-1])
+                    # a_feat = self.o_ratio * x + self.a_ratio * x * (a_map[-1])
+                    a_feat = x * a_map[-1]
                     state[i] = self.rnn[i // 3](a_feat, state[i])
+                    # conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
+                    # loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())
                     conf.append(c(state[i][-1]).permute(0, 2, 3, 1).contiguous())
                     loc.append(l(state[i][-1]).permute(0, 2, 3, 1).contiguous())
             else:
                 for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
-                    state[i] = self.rnn[0](c(x), state[i])
-                    conf.append(self.rnn[1](state[i][-1]).permute(0, 2, 3, 1).contiguous())
-                    loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+                    state[i] = self.rnn[i//3](x, state[i])
+                    conf.append(c(state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                    loc.append(l(state[i][-1]).permute(0, 2, 3, 1).contiguous())
 
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -445,6 +499,9 @@ class TSSD(nn.Module):
                 self.softmax(conf.view(-1, self.num_classes)),  # conf preds
                 self.priors.type(type(tx.data))  # default boxes
             )
+
+            # if self.refine:
+            #     self.priors = Variable(decode(loc.view(loc.size(0), -1, 4)[0].data, self.priors.data, self.variance), volatile=True)
 
             return output, state, tuple(a_map)
 
@@ -519,6 +576,10 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
                                   * num_classes, kernel_size=3, padding=1)]
     if lstm in ['tblstm']:
         rnn_layer = [ConvLSTMCell(512,512,phase=phase), ConvLSTMCell(256,256,phase=phase)]
+    elif lstm in ['tbedlstm']:
+            rnn_layer = [EDConvLSTMCell(512, [512,512], phase=phase), EDConvLSTMCell(256, [256,256], phase=phase)]
+    if lstm in ['gru']:
+        rnn_layer = [ConvGRUCell(512,512,phase=phase), ConvGRUCell(256,256,phase=phase)]
     return vgg, extra_layers, (loc_layers, conf_layers, rnn_layer)
 
 
@@ -538,7 +599,8 @@ mbox = {
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, nms_thresh=0.45, attention=False):
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01,
+              nms_thresh=0.45, attention=False, refine=False, single_batch=4, o_ratio=0.0, a_ratio=1.0):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -553,5 +615,7 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3),
                                 add_extras(extras[str(size)], 512),
-                                mbox[str(size)], num_classes, lstm=tssd, phase=phase), num_classes, lstm=tssd,
-                    top_k=top_k, thresh=thresh, nms_thresh=nms_thresh, attention=attention)
+                                mbox[str(size)], num_classes, lstm=tssd, phase=phase),
+                    num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh,
+                    nms_thresh=nms_thresh, attention=attention, refine=refine,
+                    single_batch=single_batch, o_ratio=o_ratio, a_ratio=a_ratio)

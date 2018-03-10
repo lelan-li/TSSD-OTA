@@ -5,7 +5,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 # pre_weights_name = 'weights/vgg16_reducedfc.pth'
-pre_weights_name = 'weights/ssd300_VIDDET/ssd300_VIDDET_160000_512.pth'
+pre_weights_name = 'weights/tssd300_VID2017_b8s8_RSkipTBDoLstm_Drop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 pre_weights = torch.load('../'+pre_weights_name)
 new_weights = OrderedDict()
 upsample = torch.nn.Upsample()

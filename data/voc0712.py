@@ -174,7 +174,7 @@ class VOCDetection(data.Dataset):
     """
 
     def __init__(self, root, image_sets, transform=None, target_transform=None,
-                 dataset_name='VOC0712', set_file_name='train', seq_len=8):
+                 dataset_name='VOC0712', set_file_name='train', seq_len=8, skip=False):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
@@ -183,6 +183,7 @@ class VOCDetection(data.Dataset):
         self.ids = list()
         self.video_size = list()
         self.seq_len = seq_len
+        self.skip = skip
         if self.name =='VOC0712':
             self._annopath = os.path.join('%s', 'Annotations', '%s.xml')
             self._imgpath = os.path.join('%s', 'JPEGImages', '%s.jpg')
@@ -204,7 +205,7 @@ class VOCDetection(data.Dataset):
     def __getitem__(self, index):
 
         if self.name == 'seqVID2017':
-            im_list, gt_list, maskroi_list = self.pull_seqitem(index)
+            im_list, gt_list, maskroi_list = self.pull_seqitem(index, skip=self.skip)
             return im_list, gt_list, maskroi_list
         else:
             loop_none_gt = True
@@ -219,7 +220,7 @@ class VOCDetection(data.Dataset):
     def __len__(self):
         return len(self.ids)
 
-    def select_clip(self, video_id, video_size):
+    def select_clip(self, video_id, video_size, skip=False):
         target_list = list()
         img_list = list()
 
@@ -243,13 +244,16 @@ class VOCDetection(data.Dataset):
             # cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
             # select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
             #                uniform_list.index(x) not in cast_list]
-            ## R Cont
-            # start = np.random.randint(video_size - self.seq_len)
-            # select_list = [x for x in range(start, start + self.seq_len)]
-            ## R Skip
-            skip = random.randint(1, int(video_size / self.seq_len))
-            start = random.randint(0, video_size - self.seq_len * skip)
-            select_list = list(range(start, video_size, skip))[:self.seq_len]
+            if not skip:
+                ## R Cont
+                start = np.random.randint(video_size - self.seq_len)
+                select_list = [x for x in range(start, start + self.seq_len)]
+            else:
+                ## R Skip
+                skip = random.randint(1, int(video_size / self.seq_len))
+                start = random.randint(0, video_size - self.seq_len * skip)
+                select_list = list(range(start, video_size, skip))[:self.seq_len]
+
             img_name = [video_id[1]+'/'+str(i).zfill(6) for i in select_list]
             target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \
                                     [cv2.imread(self._imgpath % (video_id[0], img_name)) for img_name in img_name]
@@ -257,11 +261,11 @@ class VOCDetection(data.Dataset):
 
         return target_list, img_list
 
-    def pull_seqitem(self, index):
+    def pull_seqitem(self, index, skip=False):
         video_id = self.ids[index]
         video_size = self.video_size[index]
 
-        target_list, img_list = self.select_clip(video_id, video_size)
+        target_list, img_list = self.select_clip(video_id, video_size, skip=skip)
         maskroi_list = list()
 
         # transform annotation
@@ -297,10 +301,10 @@ class VOCDetection(data.Dataset):
 
             maskroi = np.zeros([img.shape[0], img.shape[1]])
             for box in list(boxes):
-                box[0] *= img.shape[0]
-                box[1] *= img.shape[1]
-                box[2] *= img.shape[0]
-                box[3] *= img.shape[1]
+                box[0] *= img.shape[1]
+                box[1] *= img.shape[0]
+                box[2] *= img.shape[1]
+                box[3] *= img.shape[0]
                 pts = np.array([[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]], np.int32)
                 maskroi = cv2.fillPoly(maskroi, [pts], 1)
             maskroi_list.append(np.expand_dims(maskroi, axis=0))
@@ -320,7 +324,10 @@ class VOCDetection(data.Dataset):
         if self.target_transform is not None:
             target = self.target_transform(target, width, height, img_id)
             if len(target) == 0:
-                return img, target, height, width, maskroi
+                # target = np.array(target)
+                img,_,_ = self.transform(img)
+                img = img[:, :, (2, 1, 0)]
+                return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
             # box = target[0]
             # x_min, y_min, x_max, y_max, _ = box
             # print(x_min, y_min, x_max, y_max)
@@ -337,10 +344,10 @@ class VOCDetection(data.Dataset):
             target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
             maskroi = np.zeros([img.shape[0], img.shape[1]])
             for box in list(boxes):
-                box[0] *= img.shape[0]
-                box[1] *= img.shape[1]
-                box[2] *= img.shape[0]
-                box[3] *= img.shape[1]
+                box[0] *= img.shape[1]
+                box[1] *= img.shape[0]
+                box[2] *= img.shape[1]
+                box[3] *= img.shape[0]
                 pts = np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]], np.int32)
                 maskroi = cv2.fillPoly(maskroi, [pts], 1)
                 # cv2.imshow('mask',cv2.resize(maskori, (700,700)))
