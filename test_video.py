@@ -9,7 +9,7 @@ from data import VOCroot, VIDroot
 # from data import VOC_CLASSES as labelmap
 import torch.utils.data as data
 
-from data import base_transform, VID_CLASSES, VID_CLASSES_name
+from data import base_transform, VID_CLASSES, VID_CLASSES_name, MOT_CLASSES
 from ssd import build_ssd
 from layers.modules import  AttentionLoss
 
@@ -45,7 +45,8 @@ parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id',  default='1', type=str, help='gpu_id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 parser.add_argument('--save_dir',  default=None, type=str, help='save dir')
-
+parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
+parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
 
 args = parser.parse_args()
 
@@ -83,9 +84,13 @@ if args.cuda and torch.cuda.is_available():
 else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
-if args.dataset_name == 'VID2017' or 'seqVID2017':
+if args.dataset_name in ['VID2017', 'seqVID2017']:
     labelmap = VID_CLASSES
     num_classes = len(VID_CLASSES) + 1
+elif args.dataset_name in ['MOT17Det', 'seqMOT17Det' ]:
+    labelmap = MOT_CLASSES
+    num_classes = len(MOT_CLASSES) + 1
+    # print(num_classes)
 else:
     raise ValueError("dataset [%s] not recognized." % args.dataset_name)
 
@@ -155,7 +160,7 @@ if __name__ == '__main__':
     else:
         trained_model = os.path.join(args.model_dir,
                                      args.model_name + '_' + 'seq' + args.dataset_name + '_' + args.literation + '.pth') \
-            if args.tssd in ['lstm', 'tblstm', 'outlstm'] else os.path.join(args.model_dir,
+            if args.tssd in ['lstm', 'tblstm', 'gru'] else os.path.join(args.model_dir,
                                                        args.model_name + '_' + args.dataset_name + '_' + args.literation + '.pth')
 
     print('loading model!')
@@ -163,7 +168,8 @@ if __name__ == '__main__':
                     top_k = args.top_k,
                     thresh = args.confidence_threshold,
                     nms_thresh = args.nms_threshold,
-                    attention=args.attention)
+                    attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
+                    refine=args.refine)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
 
@@ -181,9 +187,9 @@ if __name__ == '__main__':
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
 
     att_criterion = AttentionLoss((h,w))
-    state = [None]*6 if args.tssd in ['lstm', 'tblstm', 'outlstm'] else None
+    state = [None]*6 if args.tssd in ['lstm', 'tblstm', 'gru'] else None
     pre_att_roi = list()
-    id_pre_cls = [0] * len(VID_CLASSES_name)
+    id_pre_cls = [0] * len(labelmap)
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:
@@ -233,18 +239,20 @@ if __name__ == '__main__':
         #     print(frame_num)
         cv2.imshow('frame', frame_draw)
         ch = cv2.waitKey(1)
-        # if ch == 32:
-        if frame_num in [1, 20]:
+        if ch == 32:
+        # if frame_num in [11, 23, 44, 60, 76, 89]:
             while 1:
                 in_ch = cv2.waitKey(10)
                 if in_ch == 115: # 's'
                     if args.save_dir:
                         print('save: ', frame_num)
                         if args.tssd == 'ssd':
-                            torch.save((objects, up_attmap), os.path.join(args.save_dir, 'ssd_%s.pkl' % str(frame_num)))
+                            save_tuple =(objects, up_attmap) if args.attention else (objects,)
+                            torch.save(save_tuple, os.path.join(args.save_dir, 'ssd_%s.pkl' % str(frame_num)))
                         else:
                             cv2.imwrite(os.path.join(args.save_dir, '%s.jpg' % str(frame_num)), frame)
-                            torch.save((objects, up_attmap), os.path.join(args.save_dir, '%s.pkl' % str(frame_num)))
+                            save_tuple =(objects,state, up_attmap) if args.attention else (objects, state)
+                            torch.save(save_tuple, os.path.join(args.save_dir, '%s.pkl' % str(frame_num)))
                         # cv2.imwrite('./11.jpg', frame)
                 elif in_ch == 32:
                     break

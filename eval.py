@@ -55,7 +55,8 @@ parser.add_argument('--detection', default='no', type=str2bool, help='detection 
 parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id', default='2.3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
-
+parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
+parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
 
 args = parser.parse_args()
 
@@ -494,8 +495,9 @@ if __name__ == '__main__':
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
-                        attention=args.attention
-                        )
+                        attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
+                        refine=args.refine)
+
         net.load_state_dict(torch.load(trained_model))
         net.eval()
         print('Finished loading model!', args.model_dir, args.literation)

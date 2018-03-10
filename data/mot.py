@@ -7,7 +7,8 @@ import sys
 import cv2
 import random
 
-MOT_CLASSES = ( 'object' )
+
+MOT_CLASSES = ('Pedestrian',)
 
 class MOTDetection(data.Dataset):
 
@@ -21,7 +22,7 @@ class MOTDetection(data.Dataset):
         self.name = dataset_name
 
         self._imgpath = os.path.join(self.root, '%s', 'img1', '%s.jpg')
-        self._annotation = os.path.join(self.root, '%s', 'gt', 'gt.txt')
+        self._annotation = os.path.join(self.root, '%s', 'gt', 'gt_%s.txt')
         if self.name=='seqMOT17Det':
             for line in open(os.path.join(self.root, 'ImageSet', image_sets+'.txt')):
                 split = line[:-1].split(' ')
@@ -81,7 +82,7 @@ class MOTDetection(data.Dataset):
             if int(frame_num) in select_list:
                 target_list[select_list.index(int(frame_num))].append(
                       [(int(x) - 1) / width, (int(y) - 1) / height, (int(x) + int(w) - 1) / width,
-                      (int(y) + int(h) - 1) / height, 1]
+                      (int(y) + int(h) - 1) / height, 0]
                 )  # [x_min, y_min, x_max, y_max, class]
         target_list = [np.array(o) for o in target_list]
         return target_list, img_list
@@ -130,21 +131,20 @@ class MOTDetection(data.Dataset):
         height, width, _ = img.shape
 
         target = []
-        gt_file = self._annotation % img_id[0]
+        gt_file = self._annotation % img_id
         for line in open(gt_file):
-            frame_num, id, x, y, w, h, _, _, _ = line.split(',')
-            # mm = int(img_id[1])
-            if int(frame_num) == int(img_id[1]):
-                target.append([(int(x)-1)/width, (int(y)-1)/height, (int(x)+int(w)-1)/width, (int(y)+int(h)-1)/height, 1])  # [x_min, y_min, x_max, y_max, class]
+            frame_num, id, x, y, w, h, conf, cls, vis = line.split(',')
+            # if int(frame_num) == int(img_id[1]) and int(conf)==1 and float(vis)>0.3:
+            target.append([(int(x)-1)/width, (int(y)-1)/height, (int(x)+int(w)-1)/width, (int(y)+int(h)-1)/height, 0])  # [x_min, y_min, x_max, y_max, class(0 for object here)]
 
-        for tar in target:
-            x_min, y_min, x_max, y_max, _ = tar
-            x_min = x_min * width +1
-            y_min = y_min * height + 1
-            x_max = x_max * width + 1
-            y_max = y_max * height + 1
-            img = cv2.rectangle(img, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (255,0,0),1)
-        cv2.imshow('test', cv2.resize(img, (700,700)))
+        # for tar in target:
+        #     x_min, y_min, x_max, y_max, _ = tar
+        #     x_min = x_min * width + 1
+        #     y_min = y_min * height + 1
+        #     x_max = x_max * width + 1
+        #     y_max = y_max * height + 1
+        #     img = cv2.rectangle(img, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (255,0,0),2)
+        # cv2.imshow('test', cv2.resize(img, (700,700)))
         # cv2.waitKey(0)
 
         target = np.array(target)
@@ -162,7 +162,7 @@ class MOTDetection(data.Dataset):
             box[3] *= img.shape[0]
             pts = np.array([[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]], np.int32)
             maskroi = cv2.fillPoly(maskroi, [pts], 1)
-        cv2.imshow('mask',cv2.resize(maskroi, (700,700)))
-        cv2.waitKey(0)
+        # cv2.imshow('mask',cv2.resize(maskroi, (700,700)))
+        # cv2.waitKey(0)
 
         return torch.from_numpy(img).permute(2, 0, 1), target, height, width, torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0)
