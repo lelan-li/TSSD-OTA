@@ -57,6 +57,7 @@ parser.add_argument('--gpu_id', default='2.3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
 parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
+parser.add_argument('--tub', default=0, type=int, help='tubelets rescoring')
 
 args = parser.parse_args()
 
@@ -450,11 +451,11 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
             dets = detections[0, j, :]
-            mask = dets[:, 0].gt(0.).expand(5, dets.size(0)).t()
-            dets = torch.masked_select(dets, mask).view(-1, 5)
+            mask = dets[:, 0].gt(0.).expand(dets.size(-1), dets.size(0)).t()
+            dets = torch.masked_select(dets, mask).view(-1, dets.size(-1))
             if dets.dim() == 0:
                 continue
-            boxes = dets[:, 1:]
+            boxes = dets[:, 1:-1] if dets.size(-1)==6 else dets[:, 1:]
             boxes[:, 0] *= w
             boxes[:, 2] *= w
             boxes[:, 1] *= h
@@ -496,11 +497,11 @@ if __name__ == '__main__':
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                        refine=args.refine)
+                        refine=args.refine, tub=args.tub)
 
         net.load_state_dict(torch.load(trained_model))
         net.eval()
-        print('Finished loading model!', args.model_dir, args.literation)
+        print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub))
         # load data
         if args.cuda:
             net = net.cuda()
@@ -513,5 +514,5 @@ if __name__ == '__main__':
         out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
         print('Without detection', out_dir)
         do_python_eval(out_dir)
-    print('Finished!', args.model_dir, args.literation)
+    print('Finished!', args.model_dir, args.literation, 'tub='+str(args.tub))
 

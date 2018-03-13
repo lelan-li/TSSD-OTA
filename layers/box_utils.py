@@ -235,3 +235,44 @@ def nms(boxes, scores, overlap=0.5, top_k=200):
         # keep only elements with an IoU <= overlap
         idx = idx[IoU.le(overlap)]
     return keep, count
+
+def IoU(boxes, tubelets, overlap=0.5):
+    # boxex: FloatTensor(num_prior, 4), x_min,y_min,x_max,y_max
+    # tubelets: Dict {identity:[FloatTensor(score, box)]}
+    iou = torch.zeros(boxes.size(0), len(tubelets))
+    for ide, tube in tubelets.items():
+        x1 = boxes[:, 0]
+        y1 = boxes[:, 1]
+        x2 = boxes[:, 2]
+        y2 = boxes[:, 3]
+        w = boxes.new()
+        h = boxes.new()
+        # xc = (x1+x2)/2
+        # yc = (y1+y2)/2
+        # xc_tube = (tube[0][1]+tube[0][3])/2
+        # yc_tube = (tube[0][2]+tube[0][4])/2
+
+        area = torch.mul(x2 - x1, y2 - y1)
+        area_tube = (tube[0][3]-tube[0][1]) * (tube[0][4]-tube[0][2])
+
+        # dist = torch.sqrt( torch.pow((xc - xc_tube),2) + torch.pow((yc - yc_tube),2) )
+        # dist_mask = dist.le(0.05)
+        # small_dist_num = dist_mask.sum()
+        x1 = torch.clamp(x1, min=tube[0][1])
+        y1 = torch.clamp(y1, min=tube[0][2])
+        x2 = torch.clamp(x2, max=tube[0][3])
+        y2 = torch.clamp(y2, max=tube[0][4])
+        w.resize_as_(x2)
+        h.resize_as_(y2)
+        w = x2 - x1
+        h = y2 - y1
+        # check sizes of xx1 and xx2.. after each iteration
+        w = torch.clamp(w, min=0.0)
+        h = torch.clamp(h, min=0.0)
+        inter = w*h
+        union = (area - inter) + area_tube
+        iou_ide = inter / union
+        iou[:,int(ide)] = iou_ide
+        # iou_mask = IoU.ge(overlap)
+        # large_iou = iou_mask.sum()
+    return iou

@@ -331,7 +331,7 @@ class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
                  top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False,
-                 refine=False, single_batch=4, o_ratio=0.0, a_ratio=1.0):
+                 refine=False, tub=False):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -339,10 +339,7 @@ class TSSD(nn.Module):
         self.priorbox = PriorBox(v2)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
         self.size = size
-        self.sigle_batch = single_batch
         self.attention_flag = attention
-        # self.o_ratio = o_ratio
-        # self.a_ratio = a_ratio
         self.refine = refine
         if self.refine:
             self.variance = cfg['variance']
@@ -370,7 +367,7 @@ class TSSD(nn.Module):
 
         if phase == 'test':
             self.softmax = nn.Softmax()
-            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
+            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh, tub=tub)
             # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
     def forward(self, tx, state=None):
@@ -600,7 +597,7 @@ mbox = {
 
 
 def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01,
-              nms_thresh=0.45, attention=False, refine=False, single_batch=4, o_ratio=0.0, a_ratio=1.0):
+              nms_thresh=0.45, attention=False, refine=False, tub=False):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -617,5 +614,5 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
                                 add_extras(extras[str(size)], 512),
                                 mbox[str(size)], num_classes, lstm=tssd, phase=phase),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh,
-                    nms_thresh=nms_thresh, attention=attention, refine=refine,
-                    single_batch=single_batch, o_ratio=o_ratio, a_ratio=a_ratio)
+                    nms_thresh=nms_thresh, attention=attention, refine=refine, tub=tub
+                    )

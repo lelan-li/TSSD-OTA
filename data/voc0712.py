@@ -205,7 +205,7 @@ class VOCDetection(data.Dataset):
     def __getitem__(self, index):
 
         if self.name == 'seqVID2017':
-            im_list, gt_list, maskroi_list = self.pull_seqitem(index, skip=self.skip)
+            im_list, gt_list, maskroi_list = self.pull_seqitem(index)
             return im_list, gt_list, maskroi_list
         else:
             loop_none_gt = True
@@ -220,7 +220,7 @@ class VOCDetection(data.Dataset):
     def __len__(self):
         return len(self.ids)
 
-    def select_clip(self, video_id, video_size, skip=False):
+    def select_clip(self, video_id, video_size):
         target_list = list()
         img_list = list()
 
@@ -244,7 +244,7 @@ class VOCDetection(data.Dataset):
             # cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
             # select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
             #                uniform_list.index(x) not in cast_list]
-            if not skip:
+            if not self.skip:
                 ## R Cont
                 start = np.random.randint(video_size - self.seq_len)
                 select_list = [x for x in range(start, start + self.seq_len)]
@@ -261,11 +261,11 @@ class VOCDetection(data.Dataset):
 
         return target_list, img_list
 
-    def pull_seqitem(self, index, skip=False):
+    def pull_seqitem(self, index):
         video_id = self.ids[index]
         video_size = self.video_size[index]
 
-        target_list, img_list = self.select_clip(video_id, video_size, skip=skip)
+        target_list, img_list = self.select_clip(video_id, video_size)
         maskroi_list = list()
 
         # transform annotation

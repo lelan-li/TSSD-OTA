@@ -14,13 +14,14 @@ model_name= 'ssd300'
 literation='15000'
 confidence_threshold=0.5
 nms_threshold =0.45
-top_k=5
+top_k=200
 ssd_dim=300
 dataset_name='VID2017'
-video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00011005.mp4'
+video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00007010.mp4'
 tssd = 'tblstm'
 attention=True
-refine = True
+refine = False
+tub = 3
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 if dataset_name in ['VID2017', 'seqVID2017']:
@@ -53,7 +54,8 @@ def main():
                     thresh=confidence_threshold,
                     nms_thresh=nms_threshold,
                     attention=attention,
-                    refine=refine)
+                    refine=refine,
+                    tub = tub)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
 
@@ -99,7 +101,9 @@ def main():
                 # dets = torch.masked_select(dets, mask).view(-1, 5)
                 if dets.dim() == 0:
                     continue
-                boxes = dets[1:]
+
+                boxes = dets[1:-1] if dets.size(0) == 6 else dets[1:]
+                identity = dets[-1] if dets.size(0) == 6 else -1
                 x_min = int(boxes[0] * w)
                 x_max = int(boxes[2] * w)
                 y_min = int(boxes[1] * h)
@@ -107,20 +111,20 @@ def main():
 
                 score = dets[0]
                 if score > confidence_threshold:
-                    out.append([x_min, y_min, x_max, y_max, j - 1, score])
+                    out.append([x_min, y_min, x_max, y_max, j - 1, score, identity])
 
         if attention:
             _, up_attmap = att_criterion(att_map)  # scale, batch, tensor(1,h,w)
             att_target = up_attmap[0][0].cpu().data.numpy().transpose(1, 2, 0)
         for object in out:
             color = (0, 0, 255)
-            x_min, y_min, x_max, y_max, cls, score = object
+            x_min, y_min, x_max, y_max, cls, score, identity = object
             cv2.rectangle(frame_draw, (x_min, y_min), (x_max, y_max), color, thickness=2)
             cv2.fillConvexPoly(frame_draw, np.array(
                 [[x_min - 1, y_min], [x_min - 1, y_min - 50], [x_max + 1, y_min - 50], [x_max + 1, y_min]], np.int32),
                                color)
-            cv2.putText(frame_draw, VID_CLASSES_name[cls] + str(np.around(score, decimals=2)),
-                        (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 1.4, color=(255, 255, 255), thickness=2)
+            cv2.putText(frame_draw, str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2)),
+                        (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 1, color=(255, 255, 255), thickness=1)
             print(str(frame_num) + ':' + str(np.around(score, decimals=2)) + ',')
 
         cv2.imshow('frame', frame_draw)

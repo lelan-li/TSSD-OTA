@@ -4,7 +4,7 @@ nms_thresh=0.45
 top_k=200
 set_file_name='val'
 detection='yes'
-gpu_id='1'
+gpu_id='2'
 attention='yes'
 if [ $type = 'ssd' ]
 then
@@ -40,7 +40,8 @@ then
     --gpu_id $gpu_id \
     --detection $detection \
     --attention $attention \
-    --refine 'no'
+    --refine 'no' \
+    --tub 3
 elif [ $type = 'gru' ]
 then
     pythonc3 ../eval.py \

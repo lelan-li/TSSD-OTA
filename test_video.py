@@ -1,26 +1,18 @@
 from __future__ import print_function
 import torch
-import torch.nn as nn
 import torch.backends.cudnn as cudnn
-import torchvision.transforms as transforms
 from torch.autograd import Variable
 import torch.nn.functional as F
-from data import VOCroot, VIDroot
-# from data import VOC_CLASSES as labelmap
-import torch.utils.data as data
 
 from data import base_transform, VID_CLASSES, VID_CLASSES_name, MOT_CLASSES
 from ssd import build_ssd
 from layers.modules import  AttentionLoss
 
-
-import sys
 import os
 import time
 import argparse
 import numpy as np
 import cv2
-import matplotlib
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -188,44 +180,24 @@ if __name__ == '__main__':
 
     att_criterion = AttentionLoss((h,w))
     state = [None]*6 if args.tssd in ['lstm', 'tblstm', 'gru'] else None
-    pre_att_roi = list()
-    id_pre_cls = [0] * len(labelmap)
+    identity = 0
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:
             break
         frame_draw = frame.copy()
         frame_num += 1
-        # if args.tssd == 'ssd':
-        #     im_detect = test_net(net, frame, w, h, thresh=args.confidence_threshold, tim=tim)
-        # else:
+
         objects, state, att_map = test_net(net, frame, w, h, state=state, thresh=args.confidence_threshold, tim=tim)
+
         if args.attention:
             _, up_attmap = att_criterion(att_map) # scale, batch, tensor(1,h,w)
             att_target = up_attmap[0][0].cpu().data.numpy().transpose(1, 2, 0)
-        # print(up_attmap[0][0])
-        att_roi = list()
-        # if objects:
         for object in objects:
-                # x_min, y_min, x_max, y_max, cls, score = object
-                # if frame_num in [45, 55, 65]:
-                #     print(x_min,y_min,x_max,y_max)
-            # roi = frame[y_min:y_max,x_min:x_max]
-            # att_roi_obj=[None]*len(up_attmap)
-            # for scale in up_attmap:
-                # att_roi_obj[scale] = up_attmap[scale][0][:,y_min:y_max,x_min:x_max]
-            # att_roi.append([att_roi_obj,x_min/w,y_min/h,x_max/w,y_max/h,cls]) # [object[[roi], x, y, x, y, cls]]
-
-        # match_list = att_match(att_roi, pre_att_roi)
-        # pre_att_roi = att_roi
-
-        # Draw
-        # for object in objects:
-                # if frame_num==55:
-                #     color = (180,150,0)
-                # else:
             color = (0,0,255)
             x_min, y_min, x_max, y_max, cls, score = object
+            # tubelets[cls][identity] =  [objects,]
+            ## Draw
             cv2.rectangle(frame_draw, (x_min, y_min), (x_max, y_max), color, thickness=2)
             cv2.fillConvexPoly(frame_draw, np.array(
             [[x_min-1, y_min], [x_min-1, y_min - 50], [x_max+1 , y_min - 50], [x_max+1, y_min]], np.int32),
@@ -233,7 +205,7 @@ if __name__ == '__main__':
             cv2.putText(frame_draw, VID_CLASSES_name[cls] + str(np.around(score, decimals=2)),
                     (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 1.4, color=(255, 255, 255), thickness=2)
             print(str(frame_num)+':'+str(np.around(score, decimals=2))+',')
-        # cv2.imshow('roi', att_roi.cpu().data.numpy().transpose(1, 2, 0))
+        cv2.imshow('att', att_target)
         # cv2.imshow('mask', att_target)
         # else:
         #     print(frame_num)

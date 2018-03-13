@@ -21,12 +21,12 @@ then
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../train.py \
-    --lr 0.0001 \
+    --lr 0.00001 \
     --momentum 0.9 \
     --visdom true \
     --send_images_to_visdom false \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso5_baseDrop2Clip5_FixVggExtraPreLocConf' \
-    --step_list 15000 30010 \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso5_4_baseDrop2Clip5_FixVggExtraPreLocConf20000' \
+    --step_list 5010 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
@@ -41,9 +41,9 @@ then
     --refine 'no' \
     --association 'yes' \
     --top_k 5 \
-    --loss_coe 1.0 1.0 0.5 2.0 \
-    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
-#    --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
+    --loss_coe 1.0 1.0 0.5 4.0 \
+    --resume '../weights/tssd300_VID2017_b8s8_RContiAttTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
+#    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
 #    --start_iter 25000
 elif [ $type = 'gru' ]
 then

@@ -113,7 +113,7 @@ if args.visdom:
     viz = visdom.Visdom()
 
 ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                    refine=args.refine, single_batch=int(batch_size/len(args.gpu_ids.split(','))))
+                    refine=args.refine)
 net = ssd_net
 
 if args.cuda:
@@ -388,14 +388,14 @@ def train():
                 if images.dim() == 5:
                     for time_idx, time_step in enumerate([0,-1]):
                         img_viz = (images.data[random_batch_index,time_step].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
-                        viz.image(img_viz, win=120+time_idx, opts=dict(title='seq2_frame_%s' % time_step))
+                        viz.image(img_viz, win=20+time_idx, opts=dict(title='seq_frame_%s' % time_step))
                         for scale, att_map_viz in enumerate(upsampled_att_map[time_step]):
                             viz.heatmap(att_map_viz[random_batch_index, 0, :, :].data.cpu().numpy()[::-1],
-                                        win=130*(time_idx+1) + scale,
-                                        opts=dict(title='seq2_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
+                                        win=30*(time_idx+1) + scale,
+                                        opts=dict(title='seq_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
                         viz.heatmap(masks[random_batch_index, time_step, 0, :, :].data.cpu().numpy()[::-1],
-                                    win=180 + time_idx,
-                                    opts=dict(title='seq2_attmap_gt_%s' % time_step, colormap='Jet'))
+                                    win=80 + time_idx,
+                                    opts=dict(title='seq_attmap_gt_%s' % time_step, colormap='Jet'))
                 else:
                     img_viz = (images.data[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
                     viz.image(img_viz, win=1, opts=dict(title='ssd_frame_gt', colormap='Jet'))
