@@ -23,14 +23,14 @@ then
     pythonc3 ../train.py \
     --lr 0.00001 \
     --momentum 0.9 \
-    --visdom true \
+    --visdom yes \
     --send_images_to_visdom false \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso5_4_baseDrop2Clip5_FixVggExtraPreLocConf20000' \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RContiAttTBLstm75Asso3_baseDrop2Clip5_FixVggExtraPreLocConf20000' \
     --step_list 5010 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
-    --gpu_ids '0,1' \
+    --gpu_ids '2,3' \
     --dataset_name 'seqVID2017' \
     --augm_type 'base' \
     --set_file_name 'train_video_remove_no_object' \
@@ -40,9 +40,10 @@ then
     --attention 'yes' \
     --refine 'no' \
     --association 'yes' \
-    --top_k 5 \
-    --loss_coe 1.0 1.0 0.5 4.0 \
-    --resume '../weights/tssd300_VID2017_b8s8_RContiAttTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
+    --asso_top_k 75 \
+    --asso_conf 0.3 \
+    --loss_coe 1.0 1.0 0.5 2.0 \
+    --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 #    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
 #    --start_iter 25000
 elif [ $type = 'gru' ]

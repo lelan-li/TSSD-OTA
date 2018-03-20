@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Trai
 parser.add_argument('--version', default='v2', help='conv11_2(v2) or pool6(v1) as last layer')
 parser.add_argument('--basenet', default='vgg16_reducedfc_512.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
-parser.add_argument('--batch_size', default=2, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint') #'./weights/tssd300_VID2017_b8s8_RSkipTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 parser.add_argument('--resume_from_ssd', default='ssd', type=str, help='Resume vgg and extras from ssd checkpoint')
 parser.add_argument('--freeze', default=0, type=int, help='Freeze, 1. vgg, extras; 2. vgg, extras, conf, loc')
@@ -45,12 +45,13 @@ parser.add_argument('--augm_type', default='base', type=str, help='how to transf
 parser.add_argument('--tssd',  default='tblstm', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=4, type=int, help='sequence length for training')
 parser.add_argument('--set_file_name',  default='train_video_remove_no_object', type=str, help='train_VID_DET/train_video_remove_no_object/train, MOT dataset does not use it')
-parser.add_argument('--attention', default=False, type=str2bool, help='add attention module')
-parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
+parser.add_argument('--attention', default=True, type=str2bool, help='add attention module')
+parser.add_argument('--refine', default=True, type=str2bool, help='dynamic set prior box through time')
 parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
 parser.add_argument('--association', default=True, type=str2bool, help='dynamic set prior box through time')
-parser.add_argument('--top_k', default=5, type=int, help='top_k for association loss ')
-parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 1.0], help='coefficients for loc, conf, att, asso')
+parser.add_argument('--asso_top_k', default=1, type=int, help='top_k for association loss')
+parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh for association loss')
+parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 2.0], help='coefficients for loc, conf, att, asso')
 parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
 
 args = parser.parse_args()
@@ -113,7 +114,7 @@ if args.visdom:
     viz = visdom.Visdom()
 
 ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                    refine=args.refine)
+                    refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))))
 net = ssd_net
 
 if args.cuda:
@@ -267,7 +268,7 @@ if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm', 'tbedlstm', 'outlstm']:
                               ,lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
     optimizer_rnn = optim.RMSprop(net.module.rnn.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda,
-                                refine=args.refine, association=args.association, top_k=args.top_k)
+                                refine=args.refine, association=args.association, top_k=args.asso_top_k, conf_thresh=args.asso_conf)
     print('loss coefficients:', args.loss_coe)
 else:
     if args.freeze == 0:
@@ -360,13 +361,11 @@ def train():
             optimizer_rnn.zero_grad()
         optimizer.zero_grad()
         loss = 0
+        loss_l, loss_c, loss_asso = criterion(out, targets)
         if args.association:
-            loss_l, loss_c, loss_asso = criterion(out, targets)
             loss += args.loss_coe[0]*loss_l + args.loss_coe[1]*loss_c + args.loss_coe[3]*loss_asso
-            # if iteration > 500:
-            # loss += args.loss_coe[3]*loss_asso
         else:
-            loss_l, loss_c = criterion(out, targets)
+            # loss_l, loss_c = criterion(out, targets)
             loss += args.loss_coe[0]*loss_l + args.loss_coe[1]*loss_c
         if args.attention:
             loss_att, upsampled_att_map = att_criterion(att,masks)

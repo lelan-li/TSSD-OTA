@@ -9,19 +9,33 @@ import numpy as np
 import cv2
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '3'
-model_dir='./weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf'
+model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000'
+# model_dir='./weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseDrop2Clip5Refine_FixVggExtraPreLocConf'
+# model_dir='./weights/ssd300_VIDDET_512'
 model_name= 'ssd300'
-literation='15000'
-confidence_threshold=0.5
+literation='5000'
+confidence_threshold=0.6
 nms_threshold =0.45
 top_k=200
 ssd_dim=300
-dataset_name='VID2017'
-video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00007010.mp4'
-tssd = 'tblstm'
-attention=True
+dataset_name = 'VID2017'
+video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00027000.mp4'
+save_dir = os.path.join('./demo/comp', video_name.split('/')[-1].split('.')[0])
+print(save_dir)
+if not os.path.exists(save_dir):
+    os.mkdir(save_dir)
+
+if model_dir.split('/')[2].split('_')[0][0]=='t':
+    tssd = 'tblstm'
+    attention = True
+else:
+    tssd = 'ssd'
+    attention = False
+
 refine = False
-tub = 3
+tub = 10
+tub_overlap = 0.4
+tub_generate_score = 0.7
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 if dataset_name in ['VID2017', 'seqVID2017']:
@@ -39,8 +53,8 @@ else:
 def main():
     mean = (104, 117, 123)
 
-    if model_dir in ['../weights/ssd300_VIDDET', '../weights/ssd300_VIDDET_186', '../weights/ssd300_VIDDET_512',
-                     '../weights/attssd300_VIDDET_512']:
+    if model_dir.split('/')[-1] in ['ssd300_VIDDET',  'ssd300_VIDDET_512',
+                     'attssd300_VIDDET_512']:
         trained_model = os.path.join(model_dir, 'ssd300_VIDDET_' + literation + '.pth')
     else:
         trained_model = os.path.join(model_dir,
@@ -55,7 +69,9 @@ def main():
                     nms_thresh=nms_threshold,
                     attention=attention,
                     refine=refine,
-                    tub = tub)
+                    tub = tub,
+                    tub_overlap = tub_overlap,
+                    tub_generate_score=tub_generate_score)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
 
@@ -73,15 +89,14 @@ def main():
 
     att_criterion = AttentionLoss((h, w))
     state = [None] * 6 if tssd in ['lstm', 'tblstm', 'outlstm'] else None
-    pre_att_roi = list()
-    id_pre_cls = [0] * len(labelmap)
+    # pre_att_roi = list()
+    # id_pre_cls = [0] * len(labelmap)
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:
             break
         frame_draw = frame.copy()
         frame_num += 1
-
         # objects, state, att_map = test_net(net, frame, w, h, state=state, thresh=confidence_threshold)
         im_trans = base_transform(frame, ssd_dim, mean)
         x = Variable(torch.from_numpy(im_trans).unsqueeze(0).permute(0, 3, 1, 2), volatile=True)
@@ -125,10 +140,29 @@ def main():
                                color)
             cv2.putText(frame_draw, str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2)),
                         (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 1, color=(255, 255, 255), thickness=1)
-            print(str(frame_num) + ':' + str(np.around(score, decimals=2)) + ',')
-
+            print(str(frame_num) + ':' + str(np.around(score, decimals=2)) + ','+VID_CLASSES_name[cls])
+        if not out:
+            print(str(frame_num))
         cv2.imshow('frame', frame_draw)
         ch = cv2.waitKey(1)
+        if ch == 32:
+        # if frame_num in [72, 113]:
+            while 1:
+                in_ch = cv2.waitKey(10)
+                if in_ch == 115: # 's'
+                    if save_dir:
+                        print('save: ', frame_num)
+                        torch.save(out, os.path.join(save_dir, tssd+'_%s.pkl' % str(frame_num)))
+                        # if tssd == 'ssd':
+                        #     save_tuple =(out, up_attmap) if attention else (out,)
+                        #     torch.save(save_tuple, os.path.join(save_dir, 'ssd_%s.pkl' % str(frame_num)))
+                        # else:
+                        cv2.imwrite(os.path.join(save_dir, '%s.jpg' % str(frame_num)), frame)
+                        #     save_tuple =(out,state, up_attmap) if attention else (out, state)
+                        #     torch.save(save_tuple, os.path.join(save_dir, '%s.pkl' % str(frame_num)))
+                        # cv2.imwrite('./11.jpg', frame)
+                elif in_ch == 32:
+                    break
 
     cap.release()
     cv2.destroyAllWindows()

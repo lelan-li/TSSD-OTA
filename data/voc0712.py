@@ -184,6 +184,10 @@ class VOCDetection(data.Dataset):
         self.video_size = list()
         self.seq_len = seq_len
         self.skip = skip
+        if skip:
+            print('Random collect data with a random skip')
+        else:
+            print('Random collect data continuously')
         if self.name =='VOC0712':
             self._annopath = os.path.join('%s', 'Annotations', '%s.xml')
             self._imgpath = os.path.join('%s', 'JPEGImages', '%s.jpg')
@@ -244,15 +248,15 @@ class VOCDetection(data.Dataset):
             # cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
             # select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
             #                uniform_list.index(x) not in cast_list]
-            if not self.skip:
-                ## R Cont
-                start = np.random.randint(video_size - self.seq_len)
-                select_list = [x for x in range(start, start + self.seq_len)]
-            else:
+            if self.skip:
                 ## R Skip
                 skip = random.randint(1, int(video_size / self.seq_len))
                 start = random.randint(0, video_size - self.seq_len * skip)
                 select_list = list(range(start, video_size, skip))[:self.seq_len]
+            else:
+                ## R Cont
+                start = np.random.randint(video_size - self.seq_len)
+                select_list = [x for x in range(start, start + self.seq_len)]
 
             img_name = [video_id[1]+'/'+str(i).zfill(6) for i in select_list]
             target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \

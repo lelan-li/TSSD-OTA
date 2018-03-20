@@ -145,7 +145,7 @@ def decode(loc, priors, variances):
             Shape: [num_priors,4].
         variances: (list[float]) Variances of priorboxes
     Return:
-        decoded bounding box predictions
+        decoded bounding box predictions ([x_min, y_min, x_max, y_max])
     """
 
     boxes = torch.cat((
@@ -155,6 +155,23 @@ def decode(loc, priors, variances):
     boxes[:, 2:] += boxes[:, :2]
     return boxes
 
+def half_decode(loc, priors, variances):
+    """Decode locations from predictions using priors to undo
+    the encoding we did for offset regression at train time.
+    Args:
+        loc (tensor): location predictions for loc layers,
+            Shape: [num_priors,4]
+        priors (tensor): Prior boxes in center-offset form.
+            Shape: [num_priors,4].
+        variances: (list[float]) Variances of priorboxes
+    Return:
+        decoded bounding box predictions ([center_x, center_y, w, h])
+    """
+
+    boxes = torch.cat((
+        priors[:, :2] + loc[:, :2] * variances[0] * priors[:, 2:],
+        priors[:, 2:] * torch.exp(loc[:, 2:] * variances[1])), 1)
+    return boxes
 
 def log_sum_exp(x):
     """Utility function for computing log_sum_exp while determining
@@ -240,7 +257,8 @@ def IoU(boxes, tubelets, overlap=0.5):
     # boxex: FloatTensor(num_prior, 4), x_min,y_min,x_max,y_max
     # tubelets: Dict {identity:[FloatTensor(score, box)]}
     iou = torch.zeros(boxes.size(0), len(tubelets))
-    for ide, tube in tubelets.items():
+    for i, (_, tubelet) in enumerate(tubelets.items()):
+        tube = tubelet[0]
         x1 = boxes[:, 0]
         y1 = boxes[:, 1]
         x2 = boxes[:, 2]
@@ -272,7 +290,7 @@ def IoU(boxes, tubelets, overlap=0.5):
         inter = w*h
         union = (area - inter) + area_tube
         iou_ide = inter / union
-        iou[:,int(ide)] = iou_ide
+        iou[:,int(i)] = iou_ide
         # iou_mask = IoU.ge(overlap)
         # large_iou = iou_mask.sum()
     return iou

@@ -53,11 +53,13 @@ parser.add_argument('--literation', default='20000', type=str,help='File path to
 parser.add_argument('--model_dir', default='../weights/tssd300_VID2017_b4_s16_SkipShare_preVggExtraLocConf', type=str,help='Path to save model')
 parser.add_argument('--detection', default='no', type=str2bool, help='detection or not')
 parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
-parser.add_argument('--gpu_id', default='2.3', type=str,help='gpu id')
+parser.add_argument('--gpu_id', default='2,3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
 parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
-parser.add_argument('--tub', default=0, type=int, help='tubelets rescoring')
+parser.add_argument('--tub', default=0, type=int, help='tubelet max size')
+parser.add_argument('--tub_overlap', default=0.4, type=float, help='> : generate tubelet')
+parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : generate tubelet')
 
 args = parser.parse_args()
 
@@ -416,7 +418,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     all_time = 0.
-    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
+    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name+'_tub'+str(args.tub)+'_'+str(args.tub_overlap)+'_'+str(args.tub_generate_score))
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
     pre_video_name = None
@@ -429,8 +431,10 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         video_name = img_id[1].split('/')[0]
         if video_name != pre_video_name:
             state = [None] * 6 if tssd in['lstm', 'edlstm','tblstm', 'tbedlstm', 'gru', 'outlstm'] else None
+            init_tub = True
             pre_video_name = video_name
-            # print('yes')
+        else:
+            init_tub = False
 
         x = Variable(im.unsqueeze(0))
         if args.cuda:
@@ -442,7 +446,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             detections = detections.data
         else:
             _t['im_detect'].tic()
-            detections, state, _ = net(x, state)
+            detections, state, _ = net(x, state, init_tub)
             detect_time = _t['im_detect'].toc(average=False)
             detections = detections.data
         if i>10:
@@ -464,8 +468,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             cls_dets = np.hstack((boxes.cpu().numpy(), scores[:, np.newaxis])) \
                 .astype(np.float32, copy=False)
             all_boxes[j][i] = cls_dets
-        if i % (int(num_images/10)) == 0:
-            print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
+        # if i % (int(num_images / 1000)) == 0:
+        print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
     print('all time:', all_time)
     with open(det_file, 'wb') as f:
@@ -497,11 +501,14 @@ if __name__ == '__main__':
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                        refine=args.refine, tub=args.tub)
+                        refine=args.refine,
+                        tub=args.tub,
+                        tub_overlap=args.tub_overlap,
+                        tub_generate_score=args.tub_generate_score)
 
         net.load_state_dict(torch.load(trained_model))
         net.eval()
-        print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub))
+        print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub), 'tub_overlap='+str(args.tub_overlap), 'tub_score='+str(args.tub_generate_score))
         # load data
         if args.cuda:
             net = net.cuda()
@@ -514,5 +521,5 @@ if __name__ == '__main__':
         out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
         print('Without detection', out_dir)
         do_python_eval(out_dir)
-    print('Finished!', args.model_dir, args.literation, 'tub='+str(args.tub))
+    print('Finished!', args.model_dir, args.literation, 'tub='+str(args.tub), 'tub_overlap='+str(args.tub_overlap), 'tub_score='+str(args.tub_generate_score))
 

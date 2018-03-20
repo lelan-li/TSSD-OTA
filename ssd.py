@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from layers import *
 from data import v2
-from layers import decode
+from layers import half_decode
 from data import v2 as cfg
 import os
 
@@ -331,7 +331,7 @@ class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
                  top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False,
-                 refine=False, tub=False):
+                 refine=False, single_batch=4, tub=0, tub_overlap=0.4, tub_generate_score=0.7):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -341,7 +341,9 @@ class TSSD(nn.Module):
         self.size = size
         self.attention_flag = attention
         self.refine = refine
+        self.single_batch = single_batch
         if self.refine:
+            print('Temporal Refinement!')
             self.variance = cfg['variance']
             # if phase == 'train':
             #     self.priors = [self.priors,] * single_batch
@@ -367,14 +369,14 @@ class TSSD(nn.Module):
 
         if phase == 'test':
             self.softmax = nn.Softmax()
-            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh, tub=tub)
-            # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
+            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh,
+                                 tub=tub, tub_overlap=tub_overlap, tub_generate_score=tub_generate_score)
 
-    def forward(self, tx, state=None):
+    def forward(self, tx, state=None, init_tub=False):
         if self.phase == "train":
             if self.refine:
                 prior = self.priorbox.forward()
-                self.priors = Variable(prior.repeat(self.sigle_batch, 1,1), volatile=True)
+                self.priors = Variable(prior.repeat(self.single_batch, 1,1), volatile=True)
             rnn_state = [None] * 6
             seq_output = list()
             seq_sources = list()
@@ -406,7 +408,7 @@ class TSSD(nn.Module):
                 seq_sources.append(sources)
                 # apply multibox head to source layers
                 if self.attention_flag:
-                    for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                   for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
                         if time_step == 0:
                             rnn_state[i] = self.rnn[i // 3].init_state(x)
                         a_map.append(self.attention[i//3](torch.cat((x, rnn_state[i][-1]),1)))
@@ -429,16 +431,15 @@ class TSSD(nn.Module):
 
                 # loc_batch_first = loc.view(loc.size(0), -1, 4)
                 # conf_batch_first = conf.view(conf.size(0), -1, self.num_classes),
-
                 output = (
                     loc.view(loc.size(0), -1, 4),
                     conf.view(conf.size(0), -1, self.num_classes),
                     self.priors,
                 )
-                # if self.refine:
-                    # for batch_idx in range(len(self.priors)):
-                        # self.priors[batch_idx] = decode(loc_batch_first[batch_idx].data,
-                        #                                 self.priors[batch_idx].data, self.variance)
+                if self.refine:
+                    for batch_idx in range(len(self.priors)):
+                        self.priors[batch_idx] = half_decode(loc.view(loc.size(0), -1, 4)[batch_idx].data,
+                                                        self.priors[batch_idx].data, self.variance)
 
                 seq_output.append(output)
                 seq_a_map.append(tuple(a_map))
@@ -490,15 +491,19 @@ class TSSD(nn.Module):
 
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
-
+            if init_tub:
+                self.detect.init_tubelets()
             output = self.detect(
                 loc.view(loc.size(0), -1, 4),  # loc preds
                 self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                self.priors.type(type(tx.data))  # default boxes
+                self.priors.type(type(tx.data)),  # default boxes
             )
 
-            # if self.refine:
-            #     self.priors = Variable(decode(loc.view(loc.size(0), -1, 4)[0].data, self.priors.data, self.variance), volatile=True)
+            if self.refine:
+                if init_tub:
+                    self.priors = Variable(self.priorbox.forward(), volatile=True)
+                else:
+                    self.priors = Variable(half_decode(loc.view(loc.size(0), -1, 4)[0].data, self.priors.data, self.variance), volatile=True)
 
             return output, state, tuple(a_map)
 
@@ -597,7 +602,7 @@ mbox = {
 
 
 def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01,
-              nms_thresh=0.45, attention=False, refine=False, tub=False):
+              nms_thresh=0.45, attention=False, refine=False, single_batch=4, tub=0, tub_overlap=0.4, tub_generate_score=0.7):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -614,5 +619,6 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
                                 add_extras(extras[str(size)], 512),
                                 mbox[str(size)], num_classes, lstm=tssd, phase=phase),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh,
-                    nms_thresh=nms_thresh, attention=attention, refine=refine, tub=tub
+                    nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,
+                    tub=tub, tub_overlap=tub_overlap, tub_generate_score=tub_generate_score
                     )
