@@ -3,9 +3,12 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 from torch.autograd import Function
 from torch.autograd import Variable
-from ..box_utils import decode, nms, IoU
+import torch.nn.functional as F
+from ..box_utils import decode, nms, IoU, cos_similarity, any_same_idx
 from data import v2 as cfg
+import numpy as np
 import collections
+import cv2
 
 class Detect(Function):
     """At test time, Detect is the final layer of SSD.    Decode location preds,
@@ -13,7 +16,7 @@ class Detect(Function):
     scores and threshold to a top_k number of output predictions for both
     confidence score and locations.
     """
-    def __init__(self, num_classes, bkg_label, top_k, conf_thresh, nms_thresh, tub=0, tub_overlap=0.4, tub_generate_score=0.7):
+    def __init__(self, num_classes, bkg_label, top_k, conf_thresh, nms_thresh, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
         self.num_classes = num_classes
         self.background_label = bkg_label
         self.top_k = top_k
@@ -28,14 +31,15 @@ class Detect(Function):
             self.tubelets = [dict() for _ in range(self.num_classes)]
             self.ides = [None for _ in self.tubelets]
             self.history_max_ides = [-1 for _ in range(self.num_classes)]
-            self.tub_overlap = tub_overlap
-            self.loss_hold_len = 3
+            self.tub_thresh = tub_thresh
+            self.loss_hold_len = 10
             self.tub_generate_score = tub_generate_score
+            self.tub_feature_size = 7
             self.output = torch.zeros(1, self.num_classes, self.top_k, 6)
         else:
             self.output = torch.zeros(1, self.num_classes, self.top_k, 5)
 
-    def forward(self, loc_data, conf_data, prior_data):
+    def forward(self, loc_data, conf_data, prior_data, feature=None):
         """
         Args:
             loc_data: (tensor) Loc preds from loc layers
@@ -54,33 +58,13 @@ class Detect(Function):
         else:
             conf_preds = conf_data.view(num, num_priors,
                                         self.num_classes).transpose(2, 1)
-            self.output.expand_(num, self.num_classes, self.top_k, 5)
-        # if init_tub:
-        #     if self.tub > 0:
-        #         self.tubelets = [dict() for _ in range(self.num_classes)]
+            self.output = self.output.expand(num, self.num_classes, self.top_k, 5)
         # Decode predictions into bboxes.
         for i in range(num):
             decoded_boxes = decode(loc_data[i], prior_data, self.variance)
             # For each class, perform nms
             conf_scores = conf_preds[i].clone()
-            num_det = 0
             for cl in range(1, self.num_classes):
-                if self.tub > 0:
-                    ide_list = torch.cuda.FloatTensor(num_priors).fill_(-1)
-                    if self.tubelets[cl]:
-                        iou = IoU(decoded_boxes, self.tubelets[cl])
-                        # iou = iou/iou.max()
-                        iou_max, iou_max_idx = torch.max(iou, dim=1)
-                        iou_mask = iou_max.gt(self.tub_overlap)
-                        if iou_mask.sum() == 0:
-                            continue
-                        # score_mask = conf_scores[cl].gt(self.tubelet_generate_score)
-                        ide_list[iou_mask] = self.ides[cl].index_select(0, iou_max_idx[iou_mask])
-                        tub_score = torch.zeros(iou_mask.sum()).cuda()
-                        for re in range(iou_mask.sum()):
-                            t = self.tubelets[cl][ide_list[iou_mask][re]][0][:,0]
-                            tub_score[re] = (torch.max(t) + torch.mean(t))/2
-                        conf_scores[cl][iou_mask] =  conf_scores[cl][iou_mask]*iou_max[iou_mask] + tub_score*(1-iou_max[iou_mask])
 
                 c_mask = conf_scores[cl].gt(self.conf_thresh)
                 # a = c_mask.sum()
@@ -93,37 +77,78 @@ class Detect(Function):
                 boxes = decoded_boxes[l_mask].view(-1, 4)
                 # idx of highest scoring and non-overlapping boxes per class
                 ids, count = nms(boxes, scores, self.nms_thresh, self.top_k)
+
                 if self.tub > 0:
-                    identity = ide_list[c_mask][ids[:count]]
+                    nms_score = scores[ids[:count]]
+                    nms_box = boxes[ids[:count]]
+                    nms_feature = list()
+                    for obj_box in nms_box:
+                        roi_x_min, roi_y_min, roi_x_max, roi_y_max =  int(np.clip(np.floor(obj_box[0] * feature.size(-1)), 0, feature.size(-1))), \
+                                                                      int(np.clip(np.floor(obj_box[1] * feature.size(-2)), 0, feature.size(-2))), \
+                                                                      int(np.clip(np.ceil(obj_box[2] * feature.size(-1)), 0, feature.size(-1))), \
+                                                                      int(np.clip(np.ceil(obj_box[3] * feature.size(-2)), 0, feature.size(-2)))
+                        roi_feature = F.upsample(
+                            Variable(feature[:, :, roi_y_min:roi_y_max, roi_x_min:roi_x_max], requires_grad=False),
+                            (self.tub_feature_size, self.tub_feature_size), mode='bilinear').view(-1,self.tub_feature_size * self.tub_feature_size * feature.size(1))
+                        nms_feature.append(roi_feature.data)
+
+                    identity = torch.cuda.FloatTensor(count).fill_(-1)
+                    if self.tubelets[cl]:
+                        iou = IoU(nms_box, self.tubelets[cl])
+                        # iou_max, iou_max_idx = torch.max(iou, dim=1)
+                        cos = cos_similarity(nms_feature, self.tubelets[cl])
+                        similarity = torch.exp(iou) * cos
+                        similarity_max, similarity_max_idx = torch.max(similarity, dim=1)
+                        same_idxes_idxes = any_same_idx(similarity_max_idx)
+                        for same_idx_idxes in same_idxes_idxes:
+                            _, max_idx = torch.max(similarity_max[same_idx_idxes], dim=0)
+                            mask = torch.cuda.ByteTensor(similarity_max.size()).fill_(0)
+                            mask[same_idx_idxes] = 1
+                            mask[same_idx_idxes[max_idx]] = 0
+                            similarity_max[mask] = 0.
+
+                        similarity_mask = similarity_max.gt(self.tub_thresh)
+                        if similarity_mask.sum():
+                            identity[similarity_mask] = self.ides[cl].index_select(0, similarity_max_idx[similarity_mask])
+                        # identity = self.ides[cl].index_select(0, similarity_max_idx)
                     new_mask = identity.eq(-1)
-                    tub_score_mask = scores[ids[:count]].gt(self.tub_generate_score)
+                    tub_score_mask = nms_score.gt(self.tub_generate_score)
                     generate_mask = new_mask & tub_score_mask
                     if generate_mask.sum() > 0:
-                        current =  0 if self.history_max_ides[cl]<0 else self.history_max_ides[cl]+1
-                        new_id = torch.arange(current, current+generate_mask.sum())
+                        current = 0 if self.history_max_ides[cl] < 0 else self.history_max_ides[cl] + 1
+                        new_id = torch.arange(current, current + generate_mask.sum())
                         self.history_max_ides[cl] = new_id[-1]
                         identity[generate_mask] = new_id.float()
-
+                        #tub_score = torch.zeros(iou_mask.sum()).cuda()
+                        # for re in range(iou_mask.sum()):
+                        #     t = self.tubelets[cl][identity[iou_mask][re]][0][:,0]
+                        #     tub_score[re] = (torch.max(t) + torch.mean(t))/2
+                        # nms_score[iou_mask] =  nms_score[iou_mask]*iou_max[iou_mask] + tub_score*(1-iou_max[iou_mask])
+                        # nms_score[iou_mask] =  nms_score[iou_mask]*0.5+ tub_score*0.5
                     self.output[i, cl, :count] = \
-                        torch.cat((scores[ids[:count]].unsqueeze(1),
-                                   boxes[ids[:count]],
+                        torch.cat((nms_score.unsqueeze(1),
+                                   nms_box,
                                    identity.unsqueeze(1)), 1)
+                    for det, fea in zip(self.output[i, cl, :count], nms_feature):
+                        if det[-1] >=0:
+                            tub_info = torch.cat((det[:-1].clone().unsqueeze(0), fea), dim=1)
 
-                    for det in self.output[i, cl, :count]:
-                        if det[-1] not in self.tubelets[cl]:
-                            self.tubelets[cl][det[-1]] = [det[:-1].clone().unsqueeze(0), self.loss_hold_len+1]
-                        else:
-                            new_tube = torch.cat((det[:-1].clone().unsqueeze(0), self.tubelets[cl][det[-1]][0]), 0)
-                            self.tubelets[cl][det[-1]] = [new_tube[:self.tub], self.loss_hold_len+1] if new_tube.size(0)>self.tub else [new_tube, self.loss_hold_len+1]
+                            if det[-1] not in self.tubelets[cl]:
+                                self.tubelets[cl][det[-1]] = [tub_info, self.loss_hold_len + 1]
+                            else:
+                                new_tube = torch.cat((tub_info, self.tubelets[cl][det[-1]][0]), 0)
+                                self.tubelets[cl][det[-1]] = [new_tube[:self.tub], self.loss_hold_len + 1] if new_tube.size(
+                                    0) > self.tub else [new_tube, self.loss_hold_len + 1]
                     self.delete_tubelets(cl)
                 else:
                     self.output[i, cl, :count] = \
                         torch.cat((scores[ids[:count]].unsqueeze(1),
                                    boxes[ids[:count]]), 1)
-        flt = self.output.view(-1, self.output.size(-1))
-        _, idx = flt[:, 0].sort(0)
-        _, rank = idx.sort(0)
-        flt[(rank >= self.top_k).unsqueeze(1).expand_as(flt)].fill_(0)
+
+        # flt = self.output.view(-1, self.output.size(-1))
+        # _, idx = flt[:, 0].sort(0)
+        # _, rank = idx.sort(0)
+        # flt[(rank >= self.top_k).unsqueeze(1).expand_as(flt)].fill_(0)
         return self.output
 
     def init_tubelets(self):

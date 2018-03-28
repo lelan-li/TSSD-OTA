@@ -9,20 +9,33 @@ import numpy as np
 import cv2
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '3'
-model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000'
-# model_dir='./weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseDrop2Clip5Refine_FixVggExtraPreLocConf'
-# model_dir='./weights/ssd300_VIDDET_512'
+dataset_name = 'MOT15'
+if dataset_name == 'VID2017':
+    model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
+    # model_dir='./weights/ssd300_VIDDET_512'
+    video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00007010.mp4'
+    labelmap = VID_CLASSES
+    num_classes = len(VID_CLASSES) + 1
+elif dataset_name == 'MOT15':
+    model_dir='./weights/ssd300_MOT15/ssd300_MOT15_30000.pth'
+    video_name = '/home/sean/data/MOT/snippets/PETS09-S2L1.mp4'
+    labelmap = MOT_CLASSES
+    num_classes = len(MOT_CLASSES) + 1
+else:
+    raise ValueError("dataset [%s] not recognized." % dataset_name)
+
 model_name= 'ssd300'
-literation='5000'
-confidence_threshold=0.6
+# literation='5000'
+confidence_threshold=0.3
 nms_threshold =0.45
 top_k=200
 ssd_dim=300
-dataset_name = 'VID2017'
-video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00027000.mp4'
-save_dir = os.path.join('./demo/comp', video_name.split('/')[-1].split('.')[0])
-print(save_dir)
-if not os.path.exists(save_dir):
+
+
+# save_dir = os.path.join('./demo/comp', video_name.split('/')[-1].split('.')[0])
+save_dir = None
+# print(save_dir)
+if save_dir and not os.path.exists(save_dir):
     os.mkdir(save_dir)
 
 if model_dir.split('/')[2].split('_')[0][0]=='t':
@@ -33,34 +46,24 @@ else:
     attention = False
 
 refine = False
-tub = 10
-tub_overlap = 0.4
-tub_generate_score = 0.7
+tub = 5
+tub_thresh = 1.2
+tub_generate_score = 0.5
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
-if dataset_name in ['VID2017', 'seqVID2017']:
-    labelmap = VID_CLASSES
-    num_classes = len(VID_CLASSES) + 1
-elif dataset_name in ['MOT17Det', 'seqMOT17Det' ]:
-    labelmap = MOT_CLASSES
-    num_classes = len(MOT_CLASSES) + 1
-    # print(num_classes)
-else:
-    raise ValueError("dataset [%s] not recognized." % dataset_name)
-
 
 
 def main():
     mean = (104, 117, 123)
-
-    if model_dir.split('/')[-1] in ['ssd300_VIDDET',  'ssd300_VIDDET_512',
-                     'attssd300_VIDDET_512']:
-        trained_model = os.path.join(model_dir, 'ssd300_VIDDET_' + literation + '.pth')
-    else:
-        trained_model = os.path.join(model_dir,
-                                     model_name + '_' + 'seq' + dataset_name + '_' + literation + '.pth') \
-            if tssd in ['lstm', 'tblstm', 'outlstm'] else os.path.join(model_dir,
-                                                                       model_name + '_' + dataset_name + '_' + literation + '.pth')
+    trained_model = model_dir
+    # if model_dir.split('/')[-1] in ['ssd300_VIDDET',  'ssd300_VIDDET_512',
+    #                  'attssd300_VIDDET_512']:
+    #     trained_model = os.path.join(model_dir, 'ssd300_VIDDET_' + literation + '.pth')
+    # else:
+    #     trained_model = os.path.join(model_dir,
+    #                                  model_name + '_' + 'seq' + dataset_name + '_' + literation + '.pth') \
+    #         if tssd in ['lstm', 'tblstm', 'outlstm'] else os.path.join(model_dir,
+    #                                                                    model_name + '_' + dataset_name + '_' + literation + '.pth')
 
     print('loading model!')
     net = build_ssd('test', ssd_dim, num_classes, tssd=tssd,
@@ -70,12 +73,12 @@ def main():
                     attention=attention,
                     refine=refine,
                     tub = tub,
-                    tub_overlap = tub_overlap,
+                    tub_thresh = tub_thresh,
                     tub_generate_score=tub_generate_score)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
 
-    print('Finished loading model!', model_dir, literation)
+    print('Finished loading model!', model_dir)
 
     net = net.cuda()
     cudnn.benchmark = True
@@ -138,12 +141,17 @@ def main():
             cv2.fillConvexPoly(frame_draw, np.array(
                 [[x_min - 1, y_min], [x_min - 1, y_min - 50], [x_max + 1, y_min - 50], [x_max + 1, y_min]], np.int32),
                                color)
-            cv2.putText(frame_draw, str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2)),
+            if dataset_name == 'VID2017':
+                put_str = str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2))
+            else:
+                put_str = str(int(identity))+':'+ str(np.around(score, decimals=2))
+
+            cv2.putText(frame_draw, put_str,
                         (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 1, color=(255, 255, 255), thickness=1)
             print(str(frame_num) + ':' + str(np.around(score, decimals=2)) + ','+VID_CLASSES_name[cls])
         if not out:
             print(str(frame_num))
-        cv2.imshow('frame', frame_draw)
+        cv2.imshow('frame', cv2.resize(frame_draw, (640,360)))
         ch = cv2.waitKey(1)
         if ch == 32:
         # if frame_num in [72, 113]:

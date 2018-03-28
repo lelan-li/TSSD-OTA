@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 def point_form(boxes):
     """ Convert prior_boxes to (xmin, ymin, xmax, ymax)
@@ -253,12 +254,12 @@ def nms(boxes, scores, overlap=0.5, top_k=200):
         idx = idx[IoU.le(overlap)]
     return keep, count
 
-def IoU(boxes, tubelets, overlap=0.5):
+def IoU(boxes, tubelets):
     # boxex: FloatTensor(num_prior, 4), x_min,y_min,x_max,y_max
     # tubelets: Dict {identity:[FloatTensor(score, box)]}
     iou = torch.zeros(boxes.size(0), len(tubelets))
     for i, (_, tubelet) in enumerate(tubelets.items()):
-        tube = tubelet[0]
+        tube = tubelet[0][0, :5]
         x1 = boxes[:, 0]
         y1 = boxes[:, 1]
         x2 = boxes[:, 2]
@@ -271,15 +272,15 @@ def IoU(boxes, tubelets, overlap=0.5):
         # yc_tube = (tube[0][2]+tube[0][4])/2
 
         area = torch.mul(x2 - x1, y2 - y1)
-        area_tube = (tube[0][3]-tube[0][1]) * (tube[0][4]-tube[0][2])
+        area_tube = (tube[3]-tube[1]) * (tube[4]-tube[2])
 
         # dist = torch.sqrt( torch.pow((xc - xc_tube),2) + torch.pow((yc - yc_tube),2) )
         # dist_mask = dist.le(0.05)
         # small_dist_num = dist_mask.sum()
-        x1 = torch.clamp(x1, min=tube[0][1])
-        y1 = torch.clamp(y1, min=tube[0][2])
-        x2 = torch.clamp(x2, max=tube[0][3])
-        y2 = torch.clamp(y2, max=tube[0][4])
+        x1 = torch.clamp(x1, min=tube[1])
+        y1 = torch.clamp(y1, min=tube[2])
+        x2 = torch.clamp(x2, max=tube[3])
+        y2 = torch.clamp(y2, max=tube[4])
         w.resize_as_(x2)
         h.resize_as_(y2)
         w = x2 - x1
@@ -294,3 +295,34 @@ def IoU(boxes, tubelets, overlap=0.5):
         # iou_mask = IoU.ge(overlap)
         # large_iou = iou_mask.sum()
     return iou
+
+def cos_similarity(roi_features, tubelets):
+    similarity = torch.zeros(len(roi_features), len(tubelets))
+    for j, roi in enumerate(roi_features):
+        for i, (_, tubelet) in enumerate(tubelets.items()):
+            tube = tubelet[0][:, 5:]
+            roi_repeat = roi.repeat(tube.size(0), 1)
+            pass
+            w12 = torch.sum(roi_repeat * tube, dim=1)
+            w1 = torch.norm(roi_repeat, 2, dim=1)
+            w2 = torch.norm(tube, 2, dim=1)
+            simi = w12 / (w1 * w2)
+
+            similarity[j,i] = torch.mean(simi)
+    return similarity
+
+def any_same_idx(idxes):
+    idxes_list = list(idxes)
+    same_idxes = list()
+    unique_idx_list = list()
+    same_idxes_idxes = list()
+    for i, idx in enumerate(idxes_list):
+        if idx not in unique_idx_list:
+            unique_idx_list.append(idx)
+        elif idx not in same_idxes:
+            same_idxes.append(idx)
+            same_idxes_idxes.append([idxes_list.index(idx), i,])
+        else:
+            same_idxes_idxes[same_idxes.index(idx)] += [i,]
+    same_idxes_idxes = [torch.cuda.LongTensor(o) for o in same_idxes_idxes]
+    return same_idxes_idxes
