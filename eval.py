@@ -58,7 +58,7 @@ parser.add_argument('--attention', default=False, type=str2bool, help='attention
 parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
 parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
 parser.add_argument('--tub', default=0, type=int, help='tubelet max size')
-parser.add_argument('--tub_overlap', default=0.4, type=float, help='> : generate tubelet')
+parser.add_argument('--tub_thresh', default=0.95, type=float, help='> : generate tubelet')
 parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : generate tubelet')
 
 args = parser.parse_args()
@@ -418,7 +418,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     all_time = 0.
-    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name+'_tub'+str(args.tub)+'_'+str(args.tub_overlap)+'_'+str(args.tub_generate_score))
+    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name+'_tub'+str(args.tub)+'_'+str(args.tub_thresh)+'_'+str(args.tub_generate_score))
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
     pre_video_name = None
@@ -503,12 +503,12 @@ if __name__ == '__main__':
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
                         refine=args.refine,
                         tub=args.tub,
-                        tub_overlap=args.tub_overlap,
+                        tub_thresh=args.tub_thresh,
                         tub_generate_score=args.tub_generate_score)
 
         net.load_state_dict(torch.load(trained_model))
         net.eval()
-        print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub), 'tub_overlap='+str(args.tub_overlap), 'tub_score='+str(args.tub_generate_score))
+        print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
         # load data
         if args.cuda:
             net = net.cuda()
@@ -521,5 +521,5 @@ if __name__ == '__main__':
         out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
         print('Without detection', out_dir)
         do_python_eval(out_dir)
-    print('Finished!', args.model_dir, args.literation, 'tub='+str(args.tub), 'tub_overlap='+str(args.tub_overlap), 'tub_score='+str(args.tub_generate_score))
+    print('Finished!', args.model_dir, args.literation, 'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
 

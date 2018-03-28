@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from layers import *
-from data import v2
+from data import v2, v3
 from layers import half_decode
 from data import v2 as cfg
 import os
@@ -25,13 +25,16 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False):
+    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2'):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         self.attention_flag = attention
         # TODO: implement __call__ in PriorBox
-        self.priorbox = PriorBox(v2)
+        if prior=='v2':
+            self.priorbox = PriorBox(v2)
+        elif prior=='v3':
+            self.priorbox = PriorBox(v3)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
         self.size = 300
 
@@ -40,7 +43,6 @@ class SSD(nn.Module):
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
-
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
         if self.attention_flag:
@@ -138,6 +140,7 @@ class ConvAttention(nn.Module):
         self.attention = nn.Sequential(
             nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
             nn.LeakyReLU(0.2),
+            # nn.ConvTranspose2d(int(inchannel/2), int(inchannel/4), kernel_size=3, stride=2, padding=1, output_padding=0, bias=False),
             nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
             nn.LeakyReLU(0.2),
             nn.Conv2d(inchannel, 1, kernel_size=3, stride=1, padding=1, bias=False),
@@ -209,85 +212,6 @@ class ConvLSTMCell(nn.Module):
         )
         return state
 
-class EDConvLSTMCell(nn.Module):
-    """
-    Generate a convolutional LSTM cell
-    """
-
-    def __init__(self, input_size, hidden_size_list, phase='train'):
-        super(EDConvLSTMCell, self).__init__()
-        self.input_size = input_size
-        self.en_hidden_size, self.de_hidden_size = hidden_size_list
-        self.en_Gates = nn.Conv2d(input_size + self.en_hidden_size, 4 * self.en_hidden_size, 3, padding=1)
-        self.de_Gates = nn.Conv2d(self.en_hidden_size+self.de_hidden_size, 4 * self.de_hidden_size, 3, padding=1)
-
-        self.phase = phase
-
-    def forward(self, input_, prev_state):
-
-        # get batch and spatial sizes
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
-
-
-        # generate empty prev_state, if None is provided
-        if prev_state is None:
-            en_state_size = [batch_size, self.en_hidden_size] + list(spatial_size)
-            de_state_size = [batch_size, self.de_hidden_size] + list(spatial_size)
-            prev_state = (
-                Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase=='test']),
-                Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase=='test']),
-                Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase=='test']),
-                Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase=='test'])
-            )
-
-        en_prev_cell, en_prev_hidden, de_prev_cell, de_prev_hidden = prev_state
-
-        # encode data size is [batch, channel, height, width]
-        en_stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), en_prev_hidden), 1)
-        en_gates = self.en_Gates(en_stacked_inputs)
-
-        # chunk across channel dimension
-        en_in_gate, en_remember_gate, en_out_gate, en_cell_gate = en_gates.chunk(4, 1)
-
-        # apply sigmoid non linearity
-        en_in_gate = F.sigmoid(en_in_gate)
-        en_remember_gate = F.sigmoid(en_remember_gate)
-        en_out_gate = F.sigmoid(en_out_gate)
-
-        # apply tanh non linearity
-        en_cell_gate = F.tanh(en_cell_gate)
-
-        # compute current cell and hidden state
-        en_cell = (en_remember_gate * en_prev_cell) + (en_in_gate * en_cell_gate)
-        en_hidden = en_out_gate * F.tanh(en_cell)
-
-        # decode
-        de_stacked_inputs = torch.cat((F.dropout(en_hidden, p=0.2,training=(False,True)[self.phase=='train']), de_prev_hidden), 1)
-        de_gates = self.de_Gates(de_stacked_inputs)
-        de_in_gate, de_remember_gate, de_out_gate, de_cell_gate = de_gates.chunk(4, 1)
-        de_in_gate = F.sigmoid(de_in_gate)
-        de_remember_gate = F.sigmoid(de_remember_gate)
-        de_out_gate = F.sigmoid(de_out_gate)
-        de_cell_gate = F.tanh(de_cell_gate)
-        de_cell = (de_remember_gate * de_prev_cell) + (de_in_gate * de_cell_gate)
-        de_hidden = de_out_gate * F.tanh(de_cell)
-
-        return en_cell, en_hidden, de_cell, de_hidden
-
-    def init_state(self, input_):
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
-        en_state_size = [batch_size, self.en_hidden_size] + list(spatial_size)
-        de_state_size = [batch_size, self.de_hidden_size] + list(spatial_size)
-        state = (
-            Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase == 'test']),
-            Variable(torch.zeros(en_state_size), volatile=(False, True)[self.phase == 'test']),
-            Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase == 'test']),
-            Variable(torch.zeros(de_state_size), volatile=(False, True)[self.phase == 'test'])
-        )
-        return state
-
 class ConvGRUCell(nn.Module):
     def __init__(self, input_size, hidden_size, kernel_size=3, cuda_flag=True, phase='train'):
         super(ConvGRUCell, self).__init__()
@@ -327,16 +251,27 @@ class ConvGRUCell(nn.Module):
             hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase == 'test']),)
         return hidden
 
+class Identify(nn.Module):
+
+    def __init__(self):
+        super(Identify, self).__init__()
+        pass
+    def forward(self, results, feature):
+        pass
+
 class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
-                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False,
-                 refine=False, single_batch=4, tub=0, tub_overlap=0.4, tub_generate_score=0.7):
+                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False, prior='v2',
+                 refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         # TODO: implement __call__ in PriorBox
-        self.priorbox = PriorBox(v2)
+        if prior=='v2':
+            self.priorbox = PriorBox(v2)
+        elif prior=='v3':
+            self.priorbox = PriorBox(v3)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
         self.size = size
         self.attention_flag = attention
@@ -366,11 +301,14 @@ class TSSD(nn.Module):
                                             # ConvAttention(in_channel), ConvAttention(in_channel)])
             print(self.attention)
             # print('oa ratio: ', self.o_ratio, self.a_ratio)
-
-        if phase == 'test':
+        # self.identify = identify
+        if phase == 'test': # or  self.identify:
+            self.tub = tub
             self.softmax = nn.Softmax()
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh,
-                                 tub=tub, tub_overlap=tub_overlap, tub_generate_score=tub_generate_score)
+                                 tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score)
+            # if self.identify:
+            #     self.ide = Identify()
 
     def forward(self, tx, state=None, init_tub=False):
         if self.phase == "train":
@@ -416,10 +354,10 @@ class TSSD(nn.Module):
                         a_feat =  x *a_map[-1]
                         # a_feat = self.o_ratio*x + self.a_ratio*x*(a_map[-1])
                         rnn_state[i] = self.rnn[i//3](a_feat, rnn_state[i])
-                        # conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
-                        # loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())
+                        c_current = c(rnn_state[i][-1])
                         conf.append(c(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
                         loc.append(l(rnn_state[i][-1]).permute(0, 2, 3, 1).contiguous())
+                        c_previous = c_current
                 else:
                     for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
                         rnn_state[i] = self.rnn[i//3](x, rnn_state[i])
@@ -429,20 +367,14 @@ class TSSD(nn.Module):
                 loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
                 conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
 
-                # loc_batch_first = loc.view(loc.size(0), -1, 4)
-                # conf_batch_first = conf.view(conf.size(0), -1, self.num_classes),
                 output = (
                     loc.view(loc.size(0), -1, 4),
                     conf.view(conf.size(0), -1, self.num_classes),
                     self.priors,
                 )
-                if self.refine:
-                    for batch_idx in range(len(self.priors)):
-                        self.priors[batch_idx] = half_decode(loc.view(loc.size(0), -1, 4)[batch_idx].data,
-                                                        self.priors[batch_idx].data, self.variance)
-
                 seq_output.append(output)
                 seq_a_map.append(tuple(a_map))
+
             return tuple(seq_output), tuple(seq_a_map)
         elif self.phase == 'test':
 
@@ -491,19 +423,27 @@ class TSSD(nn.Module):
 
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
-            if init_tub:
-                self.detect.init_tubelets()
-            output = self.detect(
-                loc.view(loc.size(0), -1, 4),  # loc preds
-                self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                self.priors.type(type(tx.data)),  # default boxes
-            )
-
-            if self.refine:
+            if self.tub:
+                for a_idx, a in enumerate(a_map[:3]):
+                    if not a_idx:
+                        tub_tensor = a
+                        tub_tensor_size = a.size()[2:]
+                    else:
+                        tub_tensor = torch.cat((tub_tensor, F.upsample(a, tub_tensor_size, mode='bilinear')), dim=1)
                 if init_tub:
-                    self.priors = Variable(self.priorbox.forward(), volatile=True)
-                else:
-                    self.priors = Variable(half_decode(loc.view(loc.size(0), -1, 4)[0].data, self.priors.data, self.variance), volatile=True)
+                    self.detect.init_tubelets()
+                output = self.detect(
+                    loc.view(loc.size(0), -1, 4),  # loc preds
+                    self.softmax(conf.view(-1, self.num_classes)),  # conf preds
+                    self.priors.type(type(tx.data)),  # default boxes
+                    tub_tensor
+                )
+            else:
+                output = self.detect(
+                    loc.view(loc.size(0), -1, 4),  # loc preds
+                    self.softmax(conf.view(-1, self.num_classes)),  # conf preds
+                    self.priors.type(type(tx.data)),  # default boxes
+                )
 
             return output, state, tuple(a_map)
 
@@ -578,9 +518,7 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
                                   * num_classes, kernel_size=3, padding=1)]
     if lstm in ['tblstm']:
         rnn_layer = [ConvLSTMCell(512,512,phase=phase), ConvLSTMCell(256,256,phase=phase)]
-    elif lstm in ['tbedlstm']:
-            rnn_layer = [EDConvLSTMCell(512, [512,512], phase=phase), EDConvLSTMCell(256, [256,256], phase=phase)]
-    if lstm in ['gru']:
+    elif lstm in ['gru']:
         rnn_layer = [ConvGRUCell(512,512,phase=phase), ConvGRUCell(256,256,phase=phase)]
     return vgg, extra_layers, (loc_layers, conf_layers, rnn_layer)
 
@@ -596,13 +534,15 @@ extras = {
     '512': [],
 }
 mbox = {
-    '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    # '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    '300': [5, 5, 5, 5, 5, 5],
+    # '300': [4, 4, 4, 4, 4, 4],
     '512': [],
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01,
-              nms_thresh=0.45, attention=False, refine=False, single_batch=4, tub=0, tub_overlap=0.4, tub_generate_score=0.7):
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='v2',
+              nms_thresh=0.45, attention=False, refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -613,12 +553,12 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
         return SSD(phase, *multibox(vgg(base[str(size)], 3),
                                     add_extras(extras[str(size)], 512),
                                     mbox[str(size)], num_classes, phase=phase), num_classes,
-                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention)
+                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3),
                                 add_extras(extras[str(size)], 512),
                                 mbox[str(size)], num_classes, lstm=tssd, phase=phase),
-                    num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh,
-                    nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,
-                    tub=tub, tub_overlap=tub_overlap, tub_generate_score=tub_generate_score
+                    num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
+                    nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,identify=identify,
+                    tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score
                     )

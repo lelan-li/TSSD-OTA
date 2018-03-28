@@ -7,7 +7,7 @@ import torch.nn.init as init
 import argparse
 from torch.autograd import Variable
 import torch.utils.data as data
-from data import v2, v1, AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, VOC_CLASSES, VID_CLASSES
+from data import v2, v3, AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, MOT15root, VOC_CLASSES, VID_CLASSES
 from utils.augmentations import SSDAugmentation, seqSSDAugmentation
 from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss
 from ssd import build_ssd
@@ -24,8 +24,9 @@ parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Ja
 parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint') #'./weights/tssd300_VID2017_b8s8_RSkipTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 parser.add_argument('--resume_from_ssd', default='ssd', type=str, help='Resume vgg and extras from ssd checkpoint')
-parser.add_argument('--freeze', default=0, type=int, help='Freeze, 1. vgg, extras; 2. vgg, extras, conf, loc')
-parser.add_argument('--num_workers', default=1, type=int, help='Number of workers used in dataloading')
+parser.add_argument('--resume_from_tssd', default='tssd', type=str, help='Resume vgg, extras, RNN, Attention, loc, conf from ssd checkpoint')# './weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
+parser.add_argument('--freeze', default=0, type=int, help='Freeze, 1. vgg, extras; 2. vgg, extras, conf, loc; 3. vgg, extras, rnn, attention, conf, loc')
+parser.add_argument('--num_workers', default=8, type=int, help='Number of workers used in dataloading')
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
 parser.add_argument('--start_iter', default=0, type=int, help='Begin counting iterations starting from this value (should be used with resume)')
 parser.add_argument('--cuda', default=True, type=str2bool, help='Use cuda to train model')
@@ -37,22 +38,22 @@ parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='./weights/test', help='Location to save checkpoint models')
-parser.add_argument('--dataset_name', default='seqVID2017', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
+parser.add_argument('--dataset_name', default='MOT15', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
-parser.add_argument('--gpu_ids', default='2,3', type=str, help='gpu number')
+parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='tblstm', type=str, help='ssd or tssd')
-parser.add_argument('--seq_len', default=4, type=int, help='sequence length for training')
-parser.add_argument('--set_file_name',  default='train_video_remove_no_object', type=str, help='train_VID_DET/train_video_remove_no_object/train, MOT dataset does not use it')
-parser.add_argument('--attention', default=True, type=str2bool, help='add attention module')
-parser.add_argument('--refine', default=True, type=str2bool, help='dynamic set prior box through time')
-parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
-parser.add_argument('--association', default=True, type=str2bool, help='dynamic set prior box through time')
+parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
+parser.add_argument('--seq_len', default=8, type=int, help='sequence length for training')
+parser.add_argument('--set_file_name',  default='train_VID_DET', type=str, help='train_VID_DET/train_video_remove_no_object/train, MOT dataset does not use it')
+parser.add_argument('--attention', default=False, type=str2bool, help='add attention module')
+parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
+parser.add_argument('--association', default=False, type=str2bool, help='dynamic set prior box through time')
 parser.add_argument('--asso_top_k', default=1, type=int, help='top_k for association loss')
 parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh for association loss')
 parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 2.0], help='coefficients for loc, conf, att, asso')
 parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
+parser.add_argument('--identify', default=False, type=str2bool, help='select sequence data in a skip way')
 
 args = parser.parse_args()
 
@@ -63,7 +64,13 @@ if args.cuda and torch.cuda.is_available():
 else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
-cfg = (v1, v2)[args.version == 'v2']
+if args.dataset_name in ['MOT15', 'seqMOT15']:
+    # cfg = (v1, v2)[args.version == 'v2']
+    prior = 'v3'
+    cfg = v3
+else:
+    prior = 'v2'
+    cfg = v2
 
 if not os.path.exists(args.save_folder):
     os.mkdir(args.save_folder)
@@ -76,6 +83,10 @@ if args.dataset_name=='VOC0712':
 #     train_sets = 'train'
 #     num_classes = len(VID_CLASSES) + 1
 #     data_root = VIDroot
+elif args.dataset_name=='VIDDET':
+    train_sets = 'train'
+    num_classes = len(VID_CLASSES) + 1
+    data_root = VIDroot
 elif args.dataset_name=='VID2017':
     train_sets = 'train'
     num_classes = len(VID_CLASSES) + 1
@@ -88,6 +99,14 @@ elif args.dataset_name=='seqMOT17Det':
     train_sets = 'train_video'
     num_classes = 2
     data_root = MOT17Detroot
+elif args.dataset_name=='MOT15':
+    train_sets = 'train'
+    num_classes = 2
+    data_root = MOT15root
+elif args.dataset_name == 'seqMOT15':
+    train_sets = 'train_video'
+    num_classes = 2
+    data_root = MOT15root
 else:
     train_sets = 'train_remove_noobject'
     num_classes = len(VID_CLASSES) + 1
@@ -113,8 +132,8 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                    refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))))
+ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
+                    refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))), identify=args.identify)
 net = ssd_net
 
 if args.cuda:
@@ -124,6 +143,41 @@ if args.cuda:
 if args.resume:
     print('Resuming training, loading {}...'.format(args.resume))
     ssd_net.load_weights(args.resume)
+
+elif args.resume_from_tssd != 'tssd':
+    from collections import OrderedDict
+    print('training from pretrained vgg, extras, rnn, attention, loc, conf,loading {}...'.format(args.resume_from_ssd))
+    ssd_weights = torch.load(args.resume_from_tssd)
+    ssd_vgg_weights = OrderedDict()
+    ssd_extras_weights = OrderedDict()
+    ssd_rnn_weights = OrderedDict()
+    ssd_loc_weights = OrderedDict()
+    ssd_conf_weights = OrderedDict()
+    if args.attention:
+        ssd_attention_weights = OrderedDict()
+    for key, weight in ssd_weights.items():
+        key_split = key.split('.')
+        subnet_name = key_split[0]
+        if subnet_name == 'vgg':
+            ssd_vgg_weights[key_split[1] + '.' + key_split[2]] = weight
+        elif subnet_name == 'extras':
+            ssd_extras_weights[key_split[1] + '.' + key_split[2]] = weight
+        elif subnet_name == 'rnn':
+            ssd_rnn_weights[key_split[1] + '.' + key_split[2] + '.' + key_split[3]] = weight
+        elif subnet_name == 'loc':
+            ssd_loc_weights[key_split[1] + '.' + key_split[2]] = weight
+        elif subnet_name == 'conf':
+            ssd_conf_weights[key_split[1] + '.' + key_split[2]] = weight
+        elif args.attention and subnet_name == 'attention':
+            ssd_attention_weights[key_split[1] + '.' + key_split[2] + '.' + key_split[3] + '.' + key_split[4]] = weight
+    ssd_net.vgg.load_state_dict(ssd_vgg_weights)
+    ssd_net.extras.load_state_dict(ssd_extras_weights)
+    ssd_net.rnn.load_state_dict(ssd_rnn_weights)
+    ssd_net.loc.load_state_dict(ssd_loc_weights)
+    ssd_net.conf.load_state_dict(ssd_conf_weights)
+    if args.attention:
+        ssd_net.attention.load_state_dict(ssd_attention_weights)
+
 
 elif args.resume_from_ssd != 'ssd':
     from collections import OrderedDict
@@ -162,8 +216,11 @@ if args.freeze:
         print('Freeze vgg, extras, conf, loc')
         freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.conf, ssd_net.loc]
     elif args.freeze == 3:
-        print('Freeze vgg, extras, attention')
-        freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.attention]
+        print('Freeze vgg, extras, rnn, attention, conf, loc')
+        if args.attention:
+            freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.rnn, ssd_net.attention, ssd_net.loc, ssd_net.conf]
+        else:
+            freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.rnn, ssd_net.loc, ssd_net.conf]
     else:
         freeze_nets = []
     for freeze_net in freeze_nets:
@@ -205,7 +262,9 @@ if not args.resume:
         if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm',  'tbedlstm', 'outlstm']:
             print('Initializing RNN weights...')
             ssd_net.rnn.apply(orthogonal_weights_init)
-
+    elif args.resume_from_tssd != 'tssd':
+        print('Initializing Identify weights...')
+        ssd_net.ide.apply(weights_init)
     else:
         print('Initializing extra, loc, conf weights...')
         # initialize newly added layers' weights with xavier method
@@ -266,10 +325,15 @@ if args.tssd in ['lstm', 'edlstm', 'gru', 'tblstm', 'tbedlstm', 'outlstm']:
         print('train Attention, RNN')
         optimizer = optim.SGD(net.module.attention.parameters()
                               ,lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
-    optimizer_rnn = optim.RMSprop(net.module.rnn.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda,
+    if args.freeze != 3:
+        optimizer_rnn = optim.RMSprop(net.module.rnn.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda,
                                 refine=args.refine, association=args.association, top_k=args.asso_top_k, conf_thresh=args.asso_conf)
-    print('loss coefficients:', args.loss_coe)
+        print('loss coefficients:', args.loss_coe)
+
+    if args.identify:
+        optimizer = optim.SGD(net.module.ide.parameters()
+                              , lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 else:
     if args.freeze == 0:
         optimizer = optim.SGD( net.parameters()
@@ -293,7 +357,7 @@ def train():
     net.train()
     epoch = 0
     print('Loading Dataset...')
-    if args.dataset_name in ['MOT17Det', 'seqMOT17Det']:
+    if args.dataset_name in ['MOT15', 'seqMOT15', 'MOT17Det', 'seqMOT17Det']:
         dataset = MOTDetection(data_root, train_sets, data_transform(
             ssd_dim, means),dataset_name=args.dataset_name, seq_len=args.seq_len)
     else:
@@ -346,22 +410,24 @@ def train():
         if args.cuda:
             images = Variable(images.cuda())
             masks = Variable(masks.cuda())
-            targets = [[Variable(seq_anno.cuda(), volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name=='seqVID2017' \
+            targets = [[Variable(seq_anno.cuda(), volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name in ['seqMOT15', 'seqVID2017'] \
                else [Variable(anno.cuda(), volatile=True) for anno in targets]
         else:
             images = Variable(images)
             masks = Variable(masks)
-            targets = [[Variable(seq_anno, volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name=='seqVID2017' \
+            targets = [[Variable(seq_anno, volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name in ['seqMOT15', 'seqVID2017'] \
                 else [Variable(anno, volatile=True) for anno in targets]
 
         # forward
         t0 = time.time()
+        loss = 0
         out, att = net(images)
         if args.tssd != 'ssd':
             optimizer_rnn.zero_grad()
+            loss_l, loss_c, loss_asso = criterion(out, targets)
+        else:
+            loss_l, loss_c = criterion(out, targets)
         optimizer.zero_grad()
-        loss = 0
-        loss_l, loss_c, loss_asso = criterion(out, targets)
         if args.association:
             loss += args.loss_coe[0]*loss_l + args.loss_coe[1]*loss_c + args.loss_coe[3]*loss_asso
         else:
@@ -387,14 +453,14 @@ def train():
                 if images.dim() == 5:
                     for time_idx, time_step in enumerate([0,-1]):
                         img_viz = (images.data[random_batch_index,time_step].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
-                        viz.image(img_viz, win=20+time_idx, opts=dict(title='seq_frame_%s' % time_step))
+                        viz.image(img_viz, win=120+time_idx, opts=dict(title='seq2_frame_%s' % time_step))
                         for scale, att_map_viz in enumerate(upsampled_att_map[time_step]):
                             viz.heatmap(att_map_viz[random_batch_index, 0, :, :].data.cpu().numpy()[::-1],
-                                        win=30*(time_idx+1) + scale,
-                                        opts=dict(title='seq_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
+                                        win=130*(time_idx+1) + scale,
+                                        opts=dict(title='seq2_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
                         viz.heatmap(masks[random_batch_index, time_step, 0, :, :].data.cpu().numpy()[::-1],
-                                    win=80 + time_idx,
-                                    opts=dict(title='seq_attmap_gt_%s' % time_step, colormap='Jet'))
+                                    win=180 + time_idx,
+                                    opts=dict(title='seq2_attmap_gt_%s' % time_step, colormap='Jet'))
                 else:
                     img_viz = (images.data[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
                     viz.image(img_viz, win=1, opts=dict(title='ssd_frame_gt', colormap='Jet'))
@@ -433,7 +499,7 @@ def train():
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))
-    torch.save(ssd_net.state_dict(), os.path.join(args.save_folder,'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '.pth'))
+    # torch.save(ssd_net.state_dict(), os.path.join(args.save_folder,'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '.pth'))
 
 
 def adjust_learning_rate(optimizer, gamma, step):
