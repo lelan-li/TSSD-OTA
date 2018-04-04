@@ -451,4 +451,5 @@ def seq_detection_collate(batch):
         for anno in sample[1]:
             target.append(torch.FloatTensor(anno))
         targets.append(target)
+
     return torch.stack(imgs, 0), targets, torch.stack(masks, 0)

@@ -154,6 +154,8 @@ class Detect(Function):
     def init_tubelets(self):
         if self.tub > 0:
             self.tubelets = [dict() for _ in range(self.num_classes)]
+            self.ides = [None for _ in self.tubelets]
+            self.history_max_ides = [-1 for _ in range(self.num_classes)]
 
     def delete_tubelets(self, cl):
         delet_list = []
