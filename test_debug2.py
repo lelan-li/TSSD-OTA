@@ -8,28 +8,28 @@ import os
 import numpy as np
 import cv2
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 dataset_name = 'MOT15'
 if dataset_name == 'VID2017':
-    # model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
-    model_dir = './weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf/ssd300_seqVID2017_30000.pth'
+    model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
+    # model_dir = './weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf/ssd300_seqVID2017_30000.pth'
     # model_dir='./weights/ssd300_VIDDET_512'
-    video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00027000.mp4'
+    video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00011001.mp4'
     labelmap = VID_CLASSES
     num_classes = len(VID_CLASSES) + 1
     prior = 'v2'
-    confidence_threshold = 0.6
+    confidence_threshold = 0.75
     nms_threshold = 0.5
     top_k = 200
 elif dataset_name == 'MOT15':
-    model_dir='./weights/tssd300_MOT15_SAL416/ssd300_seqMOT15_4000.pth'
+    model_dir='./weights/tssd300_MOT15_SAL222/ssd300_seqMOT15_4000.pth'
     val_list = ['TUD-Campus.mp4', 'ETH-Sunnyday.mp4', 'ETH-Pedcross2.mp4', 'ADL-Rundle-8.mp4', 'Venice-2.mp4', 'KITTI-17.mp4']
     all_list = {0:'ADL-Rundle-1.mp4', 1:'ADL-Rundle-3.mp4', 2:'ADL-Rundle-6.mp4', 3:'ADL-Rundle-8.mp4', 4:'AVG-TownCentre.mp4',
                 5:'ETH-Bahnhof.mp4', 6:'ETH-Crossing.mp4', 7:'ETH-Jelmoli.mp4', 8:'ETH-Linthescher.mp4', 9:'ETH-Pedcross2.mp4',
                 10:'ETH-Sunnyday.mp4', 11:'PETS09-S2L1.mp4', 12:'PETS09-S2L2.mp4', 13:'TUD-Campus.mp4', 14:'TUD-Crossing.mp4',
                 15:'TUD-Stadtmitte.mp4', 16:'Venice-1.mp4', 17:'Venice-2.mp4'}
 
-    video_name = '/home/sean/data/MOT/snippets/'+all_list[12] #2,4,5,7,8,15, [2,5,13,11,15 \in train]
+    video_name = '/home/sean/data/MOT/snippets/'+all_list[15] #2,4,5,7,8,15, [2,5,13,11,15 \in train]
 
     labelmap = MOT_CLASSES
     num_classes = len(MOT_CLASSES) + 1
@@ -52,7 +52,7 @@ else:
 
 refine = False
 tub = 10
-tub_thresh = 0.5
+tub_thresh = 1
 tub_generate_score = 0.1
 
 save_dir = os.path.join('./demo/OTA', video_name.split('/')[-1].split('.')[0])
@@ -102,8 +102,8 @@ def main():
     print(w, h)
     if save_dir:
         fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-        size = (w, h)
-        record = cv2.VideoWriter(os.path.join(save_dir,video_name.split('/')[-1].split('.')[0]+'_OTA.mp4'), fourcc, cap.get(cv2.CAP_PROP_FPS), size)
+        size = (640, 480)
+        record = cv2.VideoWriter(os.path.join(save_dir,video_name.split('/')[-1].split('.')[0]+'_OTA.avi'), fourcc, cap.get(cv2.CAP_PROP_FPS), size)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
 
@@ -152,8 +152,21 @@ def main():
             _, up_attmap = att_criterion(att_map)  # scale, batch, tensor(1,h,w)
             att_target = up_attmap[0][0].cpu().data.numpy().transpose(1, 2, 0)
         for object in out:
-            color = (0, 0, 255)
             x_min, y_min, x_max, y_max, cls, score, identity = object
+            if identity in [0]:
+                color = (0, 0, 255)
+            elif identity in [1]:
+                color = (0, 200, 0)
+            elif identity in [2]:
+                color = (255, 128, 0)
+            elif identity in [3]:
+                color = (255, 0, 255)
+            elif identity in [4]:
+                color = (0, 128, 255)
+            elif identity in [5]:
+                color = (255, 128, 128)
+            else:
+                color = (255, 0, 0)
             cv2.rectangle(frame_draw, (x_min, y_min), (x_max, y_max), color, thickness=2)
             cv2.fillConvexPoly(frame_draw, np.array(
                 [[x_min - 1, y_min], [x_min - 1, y_min - 50], [x_max + 1, y_min - 50], [x_max + 1, y_min]], np.int32),
@@ -170,7 +183,8 @@ def main():
             print(str(frame_num))
         cv2.imshow('frame', cv2.resize(frame_draw, (640,360)))
         if save_dir:
-            record.write(frame_draw)
+            frame_write = cv2.resize(frame_draw, size)
+            record.write(frame_write)
         ch = cv2.waitKey(1)
         if ch == 32:
         # if frame_num in [44]:
