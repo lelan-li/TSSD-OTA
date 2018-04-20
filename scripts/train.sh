@@ -1,4 +1,4 @@
-type='ssd'
+type='tblstm'
 if [ $type = 'ssd' ]
 then
     pythonc3 ../train.py \
@@ -6,11 +6,11 @@ then
     --momentum 0.9 \
     --visdom 'yes' \
     --send_images_to_visdom 'no' \
-    --save_folder '../weights/ssd300_MOT15_234/' \
-    --step_list 13000 20000 25010 \
+    --save_folder '../weights/ssd300_MOT1517_bn/' \
+    --step_list 40000 60000 80000 \
     --batch_size 64 \
     --ssd_dim 300 \
-    --gpu_ids '0,1' \
+    --gpu_ids '0,1,2,3' \
     --dataset_name 'MOT15' \
     --set_file_name 'train' \
     --augm_type 'ssd' \
@@ -19,38 +19,41 @@ then
     --attention 'no' \
     --association 'no' \
     --loss_coe 1.0 1.0 0.5 2.0 \
-    --freeze 0
-#    --resume '../weights/ssd300_MOT15/ssd300_MOT15_20000.pth' \
-#    --start_iter 20000
+    --freeze 0 \
+    --bn yes \
+    --basenet 'vgg16allbn_reducedfc_512.pth' \
+    --resume '../weights/ssd300_MOT1517_bn/ssd300_MOT15_50000.pth' \
+    --start_iter 50000
 #    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../train.py \
-    --lr 0.0001 \
+    --lr 0.00001 \
     --momentum 0.9 \
     --visdom yes \
-    --send_images_to_visdom yes \
-    --save_folder '../weights/tssd300_VID2017_b8s8_RSkipAttnolossLstm_baseDrop2Clip5_FixVggExtraPreLocConf' \
-    --step_list 15000 30010 \
+    --send_images_to_visdom no \
+    --save_folder '../weights/tssd300_VID2017_b8s8_RContiAttTBLstm75Asso3_baseDrop2Clip5_FixVggExtraPreLocConf25000' \
+    --step_list 5000 \
     --batch_size 8 \
     --seq_len 8 \
     --ssd_dim 300 \
-    --gpu_ids '0,1,2,3' \
+    --gpu_ids '2,3' \
     --dataset_name 'seqVID2017' \
     --augm_type 'base' \
-    --num_workers 8 \
+    --num_workers 1 \
     --set_file_name 'train_video_remove_no_object' \
-    --skip 'yes' \
+    --skip 'no' \
     --tssd 'tblstm' \
     --freeze 1 \
     --attention 'yes' \
     --refine 'no' \
-    --association 'no' \
+    --association 'yes' \
     --asso_top_k 75 \
-    --asso_conf 0.1 \
+    --asso_conf 0.3 \
     --loss_coe 1.0 1.0 0.5 2.0 \
-    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
-#    --resume '../weights/tssd300_VID2017_b8s8_RSkipReduAttLstm_baseDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
+    --resume '../weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf/ssd300_seqVID2017_25000.pth'
+#    --resume_from_ssd '../weights/ssd300_MOT1517_batchnorm/ssd300_MOT15_30000.pth'
+#    --resume '../weights/tssd300_MOT15_SAL416/ssd300_seqMOT15_2000.pth'
 #    --resume '../weights/tssd300_VID2017_b8s8_RSkipReduAttTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 #    --start_iter 25000
 elif [ $type = 'gru' ]

@@ -26,7 +26,7 @@ then
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000' \
+    --model_dir '../weights/tssd300_VID2017_b8s8_RContiAttTBLstm75Asso1_baseDrop2Clip5_FixVggExtraPreLocConf25000' \
     --model_name 'ssd300' \
     --literation 5000 \
     --save_folder '../eval' \
@@ -41,7 +41,7 @@ then
     --detection $detection \
     --attention $attention \
     --refine 'no' \
-    --tub 5 \
+    --tub 0 \
     --tub_thresh 0.95 \
     --tub_generate_score 0.5
 elif [ $type = 'gru' ]

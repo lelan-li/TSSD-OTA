@@ -12,7 +12,7 @@ MOT_CLASSES = ('Pedestrian',)
 
 class MOTDetection(data.Dataset):
 
-    def __init__(self, root, image_sets, transform, dataset_name='MOT17Det', seq_len=8):
+    def __init__(self, root, image_sets, transform, dataset_name='MOT17Det', seq_len=8, skip=False):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
@@ -20,7 +20,11 @@ class MOTDetection(data.Dataset):
         self.video_size = list()
         self.seq_len = seq_len
         self.name = dataset_name
-
+        self.skip = skip
+        if skip:
+            print('Random collect data with a random skip')
+        else:
+            print('Random collect data continuously')
         self._imgpath = os.path.join(self.root, '%s', 'img1', '%s.jpg')
         self._annotation = os.path.join(self.root, '%s', 'gt', 'gt_%s.txt')
 
@@ -53,33 +57,18 @@ class MOTDetection(data.Dataset):
         return len(self.ids)
 
     def select_clip(self, video_id, video_size):
-        # img_list = list()
 
-        # if video_size <= self.seq_len:
-        #     start_frame = 0
-        #     repeat = self.seq_len // video_size
-        #     residue = self.seq_len % video_size
-        #     for i in range(start_frame, video_size):
-        #         img_name = video_id[1]+'/'+str(i).zfill(6)
-        #         for _ in range(repeat):
-        #             img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
-        #         if residue:
-        #             img_list.append(cv2.imread(self._imgpath % (video_id[0], img_name)))
-        #             residue -= 1
-        # else:
-            ## D Skip
-            # skip = int(video_size / self.seq_len)
-            # uniform_list = list(range(0, video_size, skip))
-            # cast_list = random.sample(range(len(uniform_list)), len(uniform_list) - self.seq_len)
-            # select_list = [x for x in uniform_list[::random.sample([-1, 1], 1)[0]] if
-            #                uniform_list.index(x) not in cast_list]
-            ## R Cont
-            # start = np.random.randint(video_size - self.seq_len)
-            # select_list = [x for x in range(start, start + self.seq_len)]
+        if self.skip:
             ## R Skip
-        skip = random.randint(1, int(video_size / self.seq_len))
-        start = random.randint(1, video_size - self.seq_len * skip+1)
-        select_list = list(range(start, video_size, skip))[:self.seq_len]
+            skip = random.randint(1, int(video_size / self.seq_len))
+            start = random.randint(0, video_size - self.seq_len * skip)
+            select_list = list(range(start+1, video_size+1, skip))[:self.seq_len]
+        else:
+            ## R Cont
+            start = np.random.randint(video_size - self.seq_len)
+            select_list = [x for x in range(start+1, start+1 + self.seq_len)]
+
+
         img_name = [str(i).zfill(6) for i in select_list]
         img_list = [cv2.imread(self._imgpath % (video_id, img)) for img in img_name]
         gt_list = [self._annotation % (video_id, img)  for img in img_name]

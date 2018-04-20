@@ -54,6 +54,7 @@ parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh fo
 parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 2.0], help='coefficients for loc, conf, att, asso')
 parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
 parser.add_argument('--identify', default=False, type=str2bool, help='select sequence data in a skip way')
+parser.add_argument('--bn', default=False, type=str2bool, help='select sequence data in a skip way')
 
 args = parser.parse_args()
 
@@ -100,7 +101,7 @@ elif args.dataset_name=='seqMOT17Det':
     num_classes = 2
     data_root = MOT17Detroot
 elif args.dataset_name=='MOT15':
-    train_sets = 'train'
+    train_sets = 'train15_17'
     num_classes = 2
     data_root = MOT15root
 elif args.dataset_name == 'seqMOT15':
@@ -132,7 +133,7 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
+ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn,
                     refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))), identify=args.identify)
 net = ssd_net
 
@@ -359,7 +360,7 @@ def train():
     print('Loading Dataset...')
     if args.dataset_name in ['MOT15', 'seqMOT15', 'MOT17Det', 'seqMOT17Det']:
         dataset = MOTDetection(data_root, train_sets, data_transform(
-            ssd_dim, means),dataset_name=args.dataset_name, seq_len=args.seq_len)
+            ssd_dim, means),dataset_name=args.dataset_name, seq_len=args.seq_len, skip=args.skip)
     else:
         dataset = VOCDetection(data_root, train_sets, data_transform(ssd_dim, means),
                                AnnotationTransform(dataset_name=args.dataset_name),
@@ -395,7 +396,7 @@ def train():
     data_loader = data.DataLoader(dataset, batch_size, num_workers=args.num_workers,
                                   shuffle=True, collate_fn=collate_fn, pin_memory=True)
 
-    for iteration in range(args.start_iter, max_iter):
+    for iteration in range(args.start_iter, max_iter+1):
         if (not batch_iterator) or (iteration % epoch_size == 0):
             # create batch iterator
             batch_iterator = iter(data_loader)
@@ -453,14 +454,14 @@ def train():
                 if images.dim() == 5:
                     for time_idx, time_step in enumerate([0,-1]):
                         img_viz = (images.data[random_batch_index,time_step].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
-                        viz.image(img_viz, win=120+time_idx, opts=dict(title='seq2_frame_%s' % time_step))
+                        viz.image(img_viz, win=20+time_idx, opts=dict(title='seq1_frame_%s' % time_step))
                         for scale, att_map_viz in enumerate(upsampled_att_map[time_step]):
                             viz.heatmap(att_map_viz[random_batch_index, 0, :, :].data.cpu().numpy()[::-1],
-                                        win=130*(time_idx+1) + scale,
-                                        opts=dict(title='seq2_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
+                                        win=30*(time_idx+1) + scale,
+                                        opts=dict(title='seq1_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
                         viz.heatmap(masks[random_batch_index, time_step, 0, :, :].data.cpu().numpy()[::-1],
-                                    win=180 + time_idx,
-                                    opts=dict(title='seq2_attmap_gt_%s' % time_step, colormap='Jet'))
+                                    win=80 + time_idx,
+                                    opts=dict(title='seq1_attmap_gt_%s' % time_step, colormap='Jet'))
                 else:
                     img_viz = (images.data[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
                     viz.image(img_viz, win=1, opts=dict(title='ssd_frame_gt', colormap='Jet'))
@@ -495,12 +496,13 @@ def train():
                 update='append'
             )
 
-        if iteration % 5000 == 0:
+        if iteration>0 and iteration % 5000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))
-    # torch.save(ssd_net.state_dict(), os.path.join(args.save_folder,'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '.pth'))
-
+    torch.save(ssd_net.state_dict(),
+               os.path.join(args.save_folder, 'ssd' + str(ssd_dim) + '_' + args.dataset_name + '_' +
+                            repr(iteration) + '.pth'))
 
 def adjust_learning_rate(optimizer, gamma, step):
     """Sets the learning rate to the initial LR decayed by 10 at every specified step
