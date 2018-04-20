@@ -54,6 +54,7 @@ parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh fo
 parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 2.0], help='coefficients for loc, conf, att, asso')
 parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
 parser.add_argument('--identify', default=False, type=str2bool, help='select sequence data in a skip way')
+parser.add_argument('--bn', default=False, type=str2bool, help='select sequence data in a skip way')
 
 args = parser.parse_args()
 
@@ -132,7 +133,7 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
+ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn,
                     refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))), identify=args.identify)
 net = ssd_net
 
@@ -495,7 +496,7 @@ def train():
                 update='append'
             )
 
-        if iteration>0 and iteration % 500 == 0:
+        if iteration>0 and iteration % 5000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))

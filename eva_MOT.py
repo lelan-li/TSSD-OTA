@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 import time
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 class Timer(object):
     """A simple timer."""
@@ -44,7 +44,7 @@ data_size = {'MOT17-02':600, 'MOT17-04':1050, 'MOT17-05':837, 'MOT17-09':525, 'M
              'PETS09-S2L2':436, 'TUD-Crossing':201, 'Venice-1':450
              }
 
-model_dir='./weights/tssd300_MOT15_SAL222/ssd300_seqMOT15_4000.pth'
+model_dir='./weights/tssd300_MOT15_SAL416/ssd300_seqMOT15_4000.pth'
 # model_dir='./weights/ssd300_MOT1517/ssd300_MOT15_30000.pth'
 data_path = '/home/sean/data/MOT/MOT17Det/train/'
 
@@ -66,7 +66,7 @@ else:
     attention = False
 
 refine = False
-tub = 10
+tub = 0
 tub_thresh = 1
 tub_generate_score = 0.3
 tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)
@@ -104,7 +104,8 @@ def main():
                     refine=refine,
                     tub = tub,
                     tub_thresh = tub_thresh,
-                    tub_generate_score=tub_generate_score)
+                    tub_generate_score=tub_generate_score,
+                    bn=False)
     net.load_state_dict(torch.load(trained_model))
     net.eval()
 

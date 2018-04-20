@@ -14,7 +14,7 @@ if dataset_name == 'VID2017':
     model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
     # model_dir = './weights/tssd300_VID2017_b8s8_RSkipAttTBLstm_baseAugmDrop2Clip5d15k_FixVggExtraPreLocConf/ssd300_seqVID2017_30000.pth'
     # model_dir='./weights/ssd300_VIDDET_512'
-    video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00011001.mp4'
+    video_name='/home/sean/data/ILSVRC/Data/VID/snippets/val/ILSVRC2015_val_00007010.mp4'
     labelmap = VID_CLASSES
     num_classes = len(VID_CLASSES) + 1
     prior = 'v2'
@@ -55,8 +55,8 @@ tub = 10
 tub_thresh = 1
 tub_generate_score = 0.1
 
-save_dir = os.path.join('./demo/OTA', video_name.split('/')[-1].split('.')[0])
-# save_dir = None
+# save_dir = os.path.join('./demo/OTA', video_name.split('/')[-1].split('.')[0])
+save_dir = None
 # print(save_dir)
 if save_dir and not os.path.exists(save_dir):
         os.mkdir(save_dir)

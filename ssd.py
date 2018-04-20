@@ -40,9 +40,11 @@ class SSD(nn.Module):
 
         # SSD network
         self.vgg = nn.ModuleList(base)
+        self.conv4_3_layer = (23, 33)[len(self.vgg)>40]
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
+        self.extras_skip = (2, 3)[len(self.vgg)>40]
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
         if self.attention_flag:
@@ -80,21 +82,21 @@ class SSD(nn.Module):
         a_map = list()
 
         # apply vgg up to conv4_3 relu
-        for k in range(23):
+        for k in range(self.conv4_3_layer):
             x = self.vgg[k](x)
 
         s = self.L2Norm(x)
         sources.append(s)
 
         # apply vgg up to fc7
-        for k in range(23, len(self.vgg)):
+        for k in range(self.conv4_3_layer, len(self.vgg)):
             x = self.vgg[k](x)
         sources.append(x)
 
         # apply extra layers and cache source layer outputs
         for k, v in enumerate(self.extras):
             x = F.relu(v(x), inplace=True)
-            if k % 2 == 1:
+            if k % self.extras_skip == 1:
                 sources.append(x)
 
         # apply multibox head to source layers
@@ -251,14 +253,6 @@ class ConvGRUCell(nn.Module):
             hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase == 'test']),)
         return hidden
 
-class Identify(nn.Module):
-
-    def __init__(self):
-        super(Identify, self).__init__()
-        pass
-    def forward(self, results, feature):
-        pass
-
 class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
@@ -285,9 +279,11 @@ class TSSD(nn.Module):
 
         # SSD network
         self.vgg = nn.ModuleList(base)
+        self.conv4_3_layer = (23, 33)[len(self.vgg)>40]
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
+        self.extras_skip = (2, 3)[len(self.vgg)>40]
         self.lstm_mode = lstm
 
         self.rnn = nn.ModuleList(head[2])
@@ -327,7 +323,7 @@ class TSSD(nn.Module):
                 a_map = list()
 
                 # apply vgg up to conv4_3 relu
-                for k in range(23):
+                for k in range(self.conv4_3_layer):
                     x = self.vgg[k](x)
 
                 s = self.L2Norm(x)
@@ -341,7 +337,7 @@ class TSSD(nn.Module):
                 # apply extra layers and cache source layer outputs
                 for k, v in enumerate(self.extras):
                     x = F.relu(v(x), inplace=True)
-                    if k % 2 == 1:
+                    if k % self.extras_skip == 1:
                         sources.append(x)
                 seq_sources.append(sources)
                 # apply multibox head to source layers
@@ -384,7 +380,7 @@ class TSSD(nn.Module):
             a_map = list()
 
             # apply vgg up to conv4_3 relu
-            for k in range(23):
+            for k in range(self.conv4_3_layer):
                 tx = self.vgg[k](tx)
 
             s = self.L2Norm(tx)
@@ -398,7 +394,7 @@ class TSSD(nn.Module):
             # apply extra layers and cache source layer outputs
             for k, v in enumerate(self.extras):
                 tx = F.relu(v(tx), inplace=True)
-                if k % 2 == 1:
+                if k % self.extras_skip == 1:
                     sources.append(tx)
 
             # apply multibox head to source layers
@@ -478,7 +474,11 @@ def vgg(cfg, i, batch_norm=False):
     conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)
     # conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
     conv7 = nn.Conv2d(1024, 512, kernel_size=1)
-    layers += [pool5, conv6,
+    if batch_norm:
+        layers += [pool5, conv6, nn.BatchNorm2d(1024),
+                   nn.ReLU(inplace=True), conv7, nn.BatchNorm2d(512), nn.ReLU(inplace=True)]
+    else:
+        layers += [pool5, conv6,
                nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
     return layers
 
@@ -491,26 +491,35 @@ def add_extras(cfg, i, batch_norm=False):
     for k, v in enumerate(cfg):
         if in_channels != 'S':
             if v == 'S':
-                layers += [nn.Conv2d(in_channels, cfg[k + 1],
-                           kernel_size=(1, 3)[flag], stride=2, padding=1)]
+                if batch_norm:
+                    layers += [nn.Conv2d(in_channels, cfg[k + 1],
+                           kernel_size=(1, 3)[flag], stride=2, padding=1), nn.BatchNorm2d(cfg[k + 1])]
+                else:
+                    layers += [nn.Conv2d(in_channels, cfg[k + 1],
+                                         kernel_size=(1, 3)[flag], stride=2, padding=1)]
             else:
-                layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag])]
+                if batch_norm and k in [7]:
+                    layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag]), nn.BatchNorm2d(v)]
+
+                else:
+                    layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag])]
             flag = not flag
         in_channels = v
     return layers
 
-def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train'):
+def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train', batch_norm=False):
     loc_layers = []
     conf_layers = []
     rnn_layer = []
-    vgg_source = [24, -2]
+    vgg_source = ([24, -2], [34, -3])[batch_norm==True]
     for k, v in enumerate(vgg_source):
 
         loc_layers += [nn.Conv2d(vgg[v].out_channels,
                                  cfg[k] * 4, kernel_size=3, padding=1)]
         conf_layers += [nn.Conv2d(vgg[v].out_channels,
                         cfg[k] * num_classes, kernel_size=3, padding=1)]
-    for k, v in enumerate(extra_layers[1::2], 2):
+    key_extra_layers = (extra_layers[1::2], extra_layers[1::3])[batch_norm==True]
+    for k, v in enumerate(key_extra_layers, 2):
 
         loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
                                  * 4, kernel_size=3, padding=1)]
@@ -534,14 +543,14 @@ extras = {
     '512': [],
 }
 mbox = {
-    # '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-    '300': [5, 5, 5, 5, 5, 5],
+    '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+   # '300': [5, 5, 5, 5, 5, 5],
     # '300': [4, 4, 4, 4, 4, 4],
     '512': [],
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='v2',
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='v2', bn=False,
               nms_thresh=0.45, attention=False, refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
@@ -550,14 +559,14 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
         print("Error: Sorry only SSD300 is supported currently!")
         return
     if tssd == 'ssd':
-        return SSD(phase, *multibox(vgg(base[str(size)], 3),
-                                    add_extras(extras[str(size)], 512),
-                                    mbox[str(size)], num_classes, phase=phase), num_classes,
+        return SSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
+                                    add_extras(extras[str(size)], 512, batch_norm=bn),
+                                    mbox[str(size)], num_classes, phase=phase, batch_norm=bn), num_classes,
                    top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
     else:
-        return TSSD(phase, *multibox(vgg(base[str(size)], 3),
+        return TSSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                 add_extras(extras[str(size)], 512),
-                                mbox[str(size)], num_classes, lstm=tssd, phase=phase),
+                                mbox[str(size)], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
                     nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,identify=identify,
                     tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score
