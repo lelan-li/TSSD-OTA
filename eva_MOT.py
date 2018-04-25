@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 import time
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 
 class Timer(object):
     """A simple timer."""
@@ -44,8 +44,8 @@ data_size = {'MOT17-02':600, 'MOT17-04':1050, 'MOT17-05':837, 'MOT17-09':525, 'M
              'PETS09-S2L2':436, 'TUD-Crossing':201, 'Venice-1':450
              }
 
-model_dir='./weights/tssd300_MOT15_SAL416/ssd300_seqMOT15_4000.pth'
-# model_dir='./weights/ssd300_MOT1517/ssd300_MOT15_30000.pth'
+model_dir='./weights/tssd300_MOT15_SAL222/ssd300_seqMOT15_4000.pth'
+# model_dir='./weights/ssd300_MOT1517_bn/ssd300_MOT15_80000.pth'
 data_path = '/home/sean/data/MOT/MOT17Det/train/'
 
 labelmap = MOT_CLASSES
@@ -66,10 +66,10 @@ else:
     attention = False
 
 refine = False
-tub = 0
+tub = 10
 tub_thresh = 1
 tub_generate_score = 0.3
-tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)
+tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)+'_nounique'
 
 set_name = '2DMOT2015'
 if set_name == '2DMOT2015':
@@ -125,7 +125,7 @@ def main():
         frame_num = 0
         pre_frame = cv2.imread(os.path.join(img_path, '000001.jpg'))
         h, w, _ = pre_frame.shape
-        state = [None] * 6 if tssd in ['lstm', 'tblstm', 'outlstm'] else None
+        state = [None] * 6 if tssd in ['lstm', 'tblstm'] else None
         init_tub = True
 
         for i in range(1, data_size[val]+1):

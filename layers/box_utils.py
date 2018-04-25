@@ -301,7 +301,7 @@ def cos_similarity(roi_features, tubelets):
     for j, roi in enumerate(roi_features):
         for i, (_, tubelet) in enumerate(tubelets.items()):
             tube = tubelet[0][:, 5:]
-            roi_repeat = roi.repeat(tube.size(0), 1)
+            roi_repeat = roi.repeat(tube.size(0), 1);
             w12 = torch.sum(roi_repeat * tube, dim=1)
             # w12 = torch.abs(roi_repeat-tube)
             w1 = torch.norm(roi_repeat, 2, dim=1)

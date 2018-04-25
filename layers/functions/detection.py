@@ -114,7 +114,7 @@ class Detect(Function):
                         matched_mask = similarity_max.gt(self.tub_thresh)
                         # matched_score[matched_mask] = similarity_max[matched_mask]
                         if matched_mask.sum():
-                            identity[matched_mask] = self.ides[cl].index_select(0, similarity_max_idx[similarity_mask]) #similarity_max_id[matched_mask]
+                            identity[matched_mask] = self.ides[cl].index_select(0, similarity_max_idx[matched_mask]) #similarity_max_id[matched_mask]
                         # identity = self.ides[cl].index_select(0, similarity_max_idx)
                     new_mask = identity.eq(-1)
                     tub_score_mask = nms_score.gt(self.tub_generate_score)
