@@ -5,7 +5,6 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import argparse
-from torch.autograd import Variable
 import torch.utils.data as data
 from data import v2, v3, AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, MOT15root, VOC_CLASSES, VID_CLASSES
 from utils.augmentations import SSDAugmentation, seqSSDAugmentation
@@ -21,7 +20,7 @@ parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Trai
 parser.add_argument('--version', default='v2', help='conv11_2(v2) or pool6(v1) as last layer')
 parser.add_argument('--basenet', default='vgg16_reducedfc_512.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
-parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=64, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint') #'./weights/tssd300_VID2017_b8s8_RSkipTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 parser.add_argument('--resume_from_ssd', default='ssd', type=str, help='Resume vgg and extras from ssd checkpoint')
 parser.add_argument('--resume_from_tssd', default='tssd', type=str, help='Resume vgg, extras, RNN, Attention, loc, conf from ssd checkpoint')# './weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
@@ -30,18 +29,18 @@ parser.add_argument('--num_workers', default=8, type=int, help='Number of worker
 parser.add_argument('--iterations', default=120000, type=int, help='Number of training iterations')
 parser.add_argument('--start_iter', default=0, type=int, help='Begin counting iterations starting from this value (should be used with resume)')
 parser.add_argument('--cuda', default=True, type=str2bool, help='Use cuda to train model')
-parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help='initial learning rate')
+parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='Weight decay for SGD')
 parser.add_argument('--gamma', default=3, type=float, help='Gamma update for SGD')
 parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss at each iteration')
-parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
+parser.add_argument('--visdom', default=True, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='./weights/test', help='Location to save checkpoint models')
 parser.add_argument('--dataset_name', default='MOT15', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
-parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
+parser.add_argument('--gpu_ids', default='0,1,2,3', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=8, type=int, help='sequence length for training')
@@ -59,11 +58,12 @@ parser.add_argument('--bn', default=False, type=str2bool, help='select sequence 
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
+device = torch.device('cuda' if args.cuda and torch.cuda.is_available() else 'cpu')
 
-if args.cuda and torch.cuda.is_available():
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-else:
-    torch.set_default_tensor_type('torch.FloatTensor')
+# if args.cuda and torch.cuda.is_available():
+#     torch.set_default_tensor_type('torch.cuda.FloatTensor')
+# else:
+#     torch.set_default_tensor_type('torch.FloatTensor')
 
 if args.dataset_name in ['MOT15', 'seqMOT15']:
     # cfg = (v1, v2)[args.version == 'v2']
@@ -228,11 +228,10 @@ if args.freeze:
         for param in freeze_net.parameters():
             param.requires_grad = False
 
-if args.cuda:
-    net = net.cuda()
+net = net.to(device)
 
 def xavier(param):
-    init.xavier_uniform(param)
+    init.xavier_uniform_(param)
 
 def orthogonal(param):
     init.orthogonal(param)
@@ -244,7 +243,7 @@ def weights_init(m):
 
 def conv_weights_init(m):
     if isinstance(m, nn.Conv2d):
-        xavier(m.weight.data)
+        xavier(m.weight)
         # m.bias.data.zero_()
 
 def orthogonal_weights_init(m):
@@ -357,7 +356,7 @@ if args.attention:
 def train():
     net.train()
     epoch = 0
-    print('Loading Dataset...')
+    print('Loading Dataset...' + args.dataset_name)
     if args.dataset_name in ['MOT15', 'seqMOT15', 'MOT17Det', 'seqMOT17Det']:
         dataset = MOTDetection(data_root, train_sets, data_transform(
             ssd_dim, means),dataset_name=args.dataset_name, seq_len=args.seq_len, skip=args.skip)
@@ -383,8 +382,8 @@ def train():
             y_dim += 1
             legend += ['Asso Loss',]
         lot = viz.line(
-            X=torch.zeros((1,)).cpu(),
-            Y=torch.zeros((1, y_dim)).cpu(),
+            X=torch.zeros((1.,)),
+            Y=torch.zeros((1., y_dim)),
             opts=dict(
                 xlabel='Iteration',
                 ylabel='Loss',
@@ -405,23 +404,21 @@ def train():
             # adjust_learning_rate(optimizer_rnn, args.gamma, step_index)
             adjust_learning_rate(optimizer, args.gamma, step_index)
             epoch += 1
-
         images, targets, masks = next(batch_iterator)
-
-        if args.cuda:
-            images = Variable(images.cuda())
-            masks = Variable(masks.cuda())
-            targets = [[Variable(seq_anno.cuda(), volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name in ['seqMOT15', 'seqVID2017'] \
-               else [Variable(anno.cuda(), volatile=True) for anno in targets]
-        else:
-            images = Variable(images)
-            masks = Variable(masks)
-            targets = [[Variable(seq_anno, volatile=True) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name in ['seqMOT15', 'seqVID2017'] \
-                else [Variable(anno, volatile=True) for anno in targets]
+    # for iteration, (images, targets, masks) in enumerate(data_loader):
+    #     if iteration in stepvalues:
+    #         step_index += 1
+    #         # adjust_learning_rate(optimizer_rnn, args.gamma, step_index)
+    #         adjust_learning_rate(optimizer, args.gamma, step_index)
+        with torch.no_grad():
+            targets = [[seq_anno.to(device) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name in ['seqMOT15', 'seqVID2017'] \
+               else [anno.to(device) for anno in targets]
+            masks = masks.to(device)
+            images = images.to(device)
 
         # forward
         t0 = time.time()
-        loss = 0
+        loss = torch.tensor(0., requires_grad=True).to(device)
         out, att = net(images)
         if args.tssd != 'ssd':
             optimizer_rnn.zero_grad()
@@ -436,7 +433,6 @@ def train():
             loss += args.loss_coe[0]*loss_l + args.loss_coe[1]*loss_c
         if args.attention:
             loss_att, upsampled_att_map = att_criterion(att,masks)
-            # loss_l, loss_c = criterion(out, targets)
             loss += args.loss_coe[2]*loss_att
 
         loss.backward()
@@ -448,35 +444,36 @@ def train():
 
         if iteration % 10 == 0:
             print('Timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data[0]), end=' ')
+            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss), end=' ')
             if args.visdom and args.send_images_to_visdom:
                 random_batch_index = np.random.randint(images.size(0))
                 if images.dim() == 5:
                     for time_idx, time_step in enumerate([0,-1]):
-                        img_viz = (images.data[random_batch_index,time_step].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
+                        img_viz = (images[random_batch_index,time_step].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
                         viz.image(img_viz, win=20+time_idx, opts=dict(title='seq1_frame_%s' % time_step))
                         for scale, att_map_viz in enumerate(upsampled_att_map[time_step]):
-                            viz.heatmap(att_map_viz[random_batch_index, 0, :, :].data.cpu().numpy()[::-1],
+                            viz.heatmap(att_map_viz[random_batch_index, 0, :, :].cpu().numpy()[::-1],
                                         win=30*(time_idx+1) + scale,
                                         opts=dict(title='seq1_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
-                        viz.heatmap(masks[random_batch_index, time_step, 0, :, :].data.cpu().numpy()[::-1],
+                        viz.heatmap(masks[random_batch_index, time_step, 0, :, :].cpu().numpy()[::-1],
                                     win=80 + time_idx,
                                     opts=dict(title='seq1_attmap_gt_%s' % time_step, colormap='Jet'))
                 else:
-                    img_viz = (images.data[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
+                    img_viz = (images[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
                     viz.image(img_viz, win=1, opts=dict(title='ssd_frame_gt', colormap='Jet'))
                     for scale, att_map_viz in enumerate(upsampled_att_map):
-                        viz.heatmap(att_map_viz[random_batch_index, 0, :, :].data.cpu().numpy()[::-1], win=2+scale,
+                        viz.heatmap(att_map_viz[random_batch_index, 0, :, :].cpu().numpy()[::-1], win=2+scale,
                             opts=dict(title='ssd_attmap_%s' % scale, colormap='Jet'))
-                    viz.heatmap(masks[random_batch_index, 0, :, :].data.cpu().numpy()[::-1], win=2 + len(upsampled_att_map),
+                    viz.heatmap(masks[random_batch_index, 0, :, :].cpu().numpy()[::-1], win=2 + len(upsampled_att_map),
                             opts=dict(title='ssd_attmap_gt', colormap='Jet'))
 
         if args.visdom:
+            y_dis = [loss.cpu(), args.loss_coe[0]*loss_l.cpu(), args.loss_coe[1]*loss_c.cpu()]
             if iteration == 1000:
                 # initialize visdom loss plot
                 lot = viz.line(
-                    X=torch.zeros((1,)).cpu(),
-                    Y=torch.zeros((1, y_dim)).cpu(),
+                    X=torch.zeros((1.,)),
+                    Y=torch.zeros((1., y_dim)),
                     opts=dict(
                         xlabel='Iteration',
                         ylabel='Loss',
@@ -484,14 +481,13 @@ def train():
                         legend=legend,
                     )
                 )
-            y_dis = [loss.data[0], args.loss_coe[0]*loss_l.data[0], args.loss_coe[1]*loss_c.data[0]]
             if args.attention:
-                y_dis += [args.loss_coe[2]*loss_att.data[0],]
+                y_dis += [args.loss_coe[2]*loss_att.cpu(),]
             if args.association:
-                y_dis += [args.loss_coe[3]*loss_asso.data[0], ]
+                y_dis += [args.loss_coe[3]*loss_asso.cpu(),]
             viz.line(
-                X=torch.ones((1, y_dim)).cpu() * iteration,
-                Y=torch.Tensor(y_dis).unsqueeze(0).cpu(),
+                X=torch.ones((1., y_dim)) * iteration,
+                Y=torch.FloatTensor(y_dis).unsqueeze(0),
                 win=lot,
                 update='append'
             )

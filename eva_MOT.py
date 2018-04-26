@@ -69,7 +69,7 @@ refine = False
 tub = 10
 tub_thresh = 1
 tub_generate_score = 0.3
-tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)+'_nounique'
+tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)+'_test'
 
 set_name = '2DMOT2015'
 if set_name == '2DMOT2015':
@@ -134,29 +134,28 @@ def main():
             frame_draw = frame.copy()
             frame_num += 1
             im_trans = base_transform(frame, ssd_dim, mean)
-            x = Variable(torch.from_numpy(im_trans).unsqueeze(0).permute(0, 3, 1, 2), volatile=True)
-            x = x.cuda()
-            if tssd == 'ssd':
-                _t['im_detect'].tic()
-                detections, _ = net(x)
-                detect_time = _t['im_detect'].toc(average=False)
-                detections = detections.data
-            else:
-                _t['im_detect'].tic()
-                detections, state, _ = net(x, state, init_tub)
-                detect_time = _t['im_detect'].toc(average=False)
-                detections = detections.data
-                init_tub = False
+            with torch.no_grad():
+                x = torch.from_numpy(im_trans).unsqueeze(0).permute(0, 3, 1, 2).cuda()
+                if tssd == 'ssd':
+                    _t['im_detect'].tic()
+                    detections, _ = net(x)
+                    detect_time = _t['im_detect'].toc(average=False)
+                else:
+                    _t['im_detect'].tic()
+                    detections, state, _ = net(x, state, init_tub)
+                    detect_time = _t['im_detect'].toc(average=False)
+                    init_tub = False
             all_time += detect_time
             out = list()
             for j in range(1, detections.size(1)):
+                if detections[0, j, :, :].sum() == 0:
+                    continue
                 for k in range(detections.size(2)):
                     dets = detections[0, j, k, :]
                     # mask = dets[:, 0].gt(0.).expand(5, dets.size(0)).t()
                     # dets = torch.masked_select(dets, mask).view(-1, 5)
-                    if dets.dim() == 0:
+                    if dets.sum() == 0:
                         continue
-
                     boxes = dets[1:-1] if dets.size(0) == 6 else dets[1:]
                     identity = dets[-1] if dets.size(0) == 6 else -1
                     x_min = int(boxes[0] * w)

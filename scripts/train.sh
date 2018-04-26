@@ -1,16 +1,16 @@
 type='ssd'
 if [ $type = 'ssd' ]
 then
-    pythonc3 ../train.py \
+    python ../train.py \
     --lr 0.0001 \
     --momentum 0.9 \
     --visdom 'yes' \
     --send_images_to_visdom 'no' \
-    --save_folder '../weights/ssd300_MOT1517_bn/' \
-    --step_list 40000 60000 80000 \
+    --save_folder '../weights040/ssd300_MOT1517' \
+    --step_list 15000 25000 35000 \
     --batch_size 64 \
     --ssd_dim 300 \
-    --gpu_ids '0,1,2,3' \
+    --gpu_ids '0,1' \
     --dataset_name 'MOT15' \
     --set_file_name 'train' \
     --augm_type 'ssd' \
@@ -20,10 +20,10 @@ then
     --association 'no' \
     --loss_coe 1.0 1.0 0.5 2.0 \
     --freeze 0 \
-    --bn yes \
-    --basenet 'vgg16allbn_reducedfc_512.pth' \
-    --resume '../weights/ssd300_MOT1517_bn/ssd300_MOT15_50000.pth' \
-    --start_iter 55000
+    --bn 'no' \
+    --basenet 'vgg16_reducedfc_512.pth'
+#    --resume '../weights/ssd300_MOT1517_bn/ssd300_MOT15_50000.pth' \
+#    --start_iter 55000
 #    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
 elif [ $type = 'tblstm' ]
 then

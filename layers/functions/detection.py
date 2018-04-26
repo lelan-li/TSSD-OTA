@@ -35,9 +35,9 @@ class Detect(Function):
             self.loss_hold_len = 10
             self.tub_generate_score = tub_generate_score
             self.tub_feature_size = 7
-            self.output = torch.zeros(1, self.num_classes, self.top_k, 6)
+            self.output = torch.zeros(1, self.num_classes, self.top_k, 6, requires_grad=False)
         else:
-            self.output = torch.zeros(1, self.num_classes, self.top_k, 5)
+            self.output = torch.zeros(1, self.num_classes, self.top_k, 5, requires_grad=False)
 
     def forward(self, loc_data, conf_data, prior_data, feature=None):
         """
@@ -69,7 +69,7 @@ class Detect(Function):
                 c_mask = conf_scores[cl].gt(self.conf_thresh)
                 # a = c_mask.sum()
                 scores = conf_scores[cl][c_mask]
-                if scores.dim() == 0:
+                if scores.size(0) == 0:
                     if self.tub > 0:
                         self.delete_tubelets(cl)
                     continue
@@ -88,9 +88,9 @@ class Detect(Function):
                                                                       int(np.clip(np.ceil(obj_box[2] * feature.size(-1)), 0, feature.size(-1))), \
                                                                       int(np.clip(np.ceil(obj_box[3] * feature.size(-2)), 0, feature.size(-2)))
                         roi_feature = F.upsample(
-                            Variable(feature[:, :, roi_y_min:roi_y_max, roi_x_min:roi_x_max], requires_grad=False),
-                            (self.tub_feature_size, self.tub_feature_size), mode='bilinear').view(-1,self.tub_feature_size * self.tub_feature_size * feature.size(1))
-                        nms_feature.append(roi_feature.data)
+                            feature[:, :, roi_y_min:roi_y_max, roi_x_min:roi_x_max],
+                            (self.tub_feature_size, self.tub_feature_size), mode='bilinear',align_corners=True).view(-1,self.tub_feature_size * self.tub_feature_size * feature.size(1))
+                        nms_feature.append(roi_feature)
 
                     identity = torch.cuda.FloatTensor(count).fill_(-1)
                     # matched_score = torch.cuda.FloatTensor(count).fill_(self.tub_thresh)
@@ -121,9 +121,9 @@ class Detect(Function):
                     generate_mask = new_mask & tub_score_mask
                     if generate_mask.sum() > 0:
                         current = 0 if self.history_max_ides[cl] < 0 else self.history_max_ides[cl] + 1
-                        new_id = torch.arange(current, current + generate_mask.sum())
+                        new_id = torch.arange(current, current + generate_mask.sum().float())
                         self.history_max_ides[cl] = new_id[-1]
-                        identity[generate_mask] = new_id.float()
+                        identity[generate_mask] = new_id
                         #tub_score = torch.zeros(iou_mask.sum()).cuda()
                         # for re in range(iou_mask.sum()):
                         #     t = self.tubelets[cl][identity[iou_mask][re]][0][:,0]
@@ -131,23 +131,23 @@ class Detect(Function):
                         # nms_score[iou_mask] =  nms_score[iou_mask]*iou_max[iou_mask] + tub_score*(1-iou_max[iou_mask])
                         # nms_score[iou_mask] =  nms_score[iou_mask]*0.5+ tub_score*0.5
                     self.output[i, cl, :count] = \
-                        torch.cat((nms_score.unsqueeze(1),
+                          torch.cat((nms_score.unsqueeze(1),
                                    nms_box,
                                    identity.unsqueeze(1)), 1)
                     for det, fea in zip(self.output[i, cl, :count], nms_feature):
                         if det[-1] >=0:
                             tub_info = torch.cat((det[:-1].clone().unsqueeze(0), fea), dim=1)
 
-                            if det[-1] not in self.tubelets[cl]:
+                            if float(det[-1]) not in self.tubelets[cl]:
                                 # self.tubelets[cl][det[-1]] = [tub_info, self.tub_thresh, self.loss_hold_len + 1]
-                                self.tubelets[cl][det[-1]] = [tub_info, self.loss_hold_len + 1]
+                                self.tubelets[cl][int(det[-1].clone())] = [tub_info, self.loss_hold_len + 1]
 
                             else:
-                                new_tube = torch.cat((tub_info, self.tubelets[cl][det[-1]][0]), 0)
+                                new_tube = torch.cat((tub_info, self.tubelets[cl][int(det[-1])][0]), 0)
                                 # new_tub_thresh = np.clip((np.min([self.tubelets[cl][det[-1]][1], ms]) + np.mean([self.tubelets[cl][det[-1]][1], ms]) )/2, 0, 1.5 )
                                 # self.tubelets[cl][det[-1]] = [new_tube[:self.tub], new_tub_thresh, self.loss_hold_len + 1] if new_tube.size(
                                 #     0) > self.tub else [new_tube, new_tub_thresh, self.loss_hold_len + 1]
-                                self.tubelets[cl][det[-1]] = [new_tube[:self.tub],self.loss_hold_len + 1] if new_tube.size(
+                                self.tubelets[cl][int(det[-1].clone())] = [new_tube[:self.tub],self.loss_hold_len + 1] if new_tube.size(
                                     0) > self.tub else [new_tube, self.loss_hold_len + 1]
                     self.delete_tubelets(cl)
                 else:

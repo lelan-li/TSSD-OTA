@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
+# from torch.autograd import Variable
 from layers import *
 from data import v2, v3
-from layers import half_decode
 from data import v2 as cfg
 import os
 
@@ -25,17 +24,19 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2'):
+    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2', cuda=True):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         self.attention_flag = attention
+        self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
         # TODO: implement __call__ in PriorBox
         if prior=='v2':
             self.priorbox = PriorBox(v2)
         elif prior=='v3':
             self.priorbox = PriorBox(v3)
-        self.priors = Variable(self.priorbox.forward(), volatile=True)
+        with torch.no_grad():
+            self.priors = self.priorbox.forward().to(self.device)
         self.size = 300
 
         # SSD network
@@ -53,7 +54,7 @@ class SSD(nn.Module):
                                             # ConvAttention(256),ConvAttention(256)])
             print(self.attention)
         if phase == 'test':
-            self.softmax = nn.Softmax()
+            self.softmax = nn.Softmax(dim=1)
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
                                 # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
 
@@ -80,11 +81,9 @@ class SSD(nn.Module):
         loc = list()
         conf = list()
         a_map = list()
-
         # apply vgg up to conv4_3 relu
         for k in range(self.conv4_3_layer):
             x = self.vgg[k](x)
-
         s = self.L2Norm(x)
         sources.append(s)
 
@@ -101,22 +100,22 @@ class SSD(nn.Module):
 
         # apply multibox head to source layers
         if self.attention_flag:
-            for i, (x, l, c) in enumerate(zip(sources, self.loc, self.conf)):
-                a_map.append(self.attention[i//3](x))
-                a_feat = x*a_map[-1]
+            for i, (f, l, c) in enumerate(zip(sources, self.loc, self.conf)):
+                a_map.append(self.attention[i//3](f))
+                a_feat = f*a_map[-1]
                 loc.append(l(a_feat).permute(0, 2, 3, 1).contiguous())  # [ith_multi_layer, batch, height, width, out_channel]
                 conf.append(c(a_feat).permute(0, 2, 3, 1).contiguous())
         else:
-            for (x, l, c) in zip(sources, self.loc, self.conf):
-                loc.append(l(x).permute(0, 2, 3, 1).contiguous()) # [ith_multi_layer, batch, height, width, out_channel]
-                conf.append(c(x).permute(0, 2, 3, 1).contiguous())
+            for (f, l, c) in zip(sources, self.loc, self.conf):
+                loc.append(l(f).permute(0, 2, 3, 1).contiguous()) # [ith_multi_layer, batch, height, width, out_channel]
+                conf.append(c(f).permute(0, 2, 3, 1).contiguous())
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
             output = self.detect(
                 loc.view(loc.size(0), -1, 4),                   # loc preds
                 self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                self.priors.type(type(x.data))                  # default boxes
+                self.priors,                 # default boxes
             )
         else:
             output = (
@@ -176,8 +175,8 @@ class ConvLSTMCell(nn.Module):
         if prev_state is None:
             state_size = [batch_size, self.hidden_size] + list(spatial_size)
             prev_state = (
-                Variable(torch.zeros(state_size), volatile=(False, True)[self.phase=='test']),
-                Variable(torch.zeros(state_size), volatile=(False, True)[self.phase=='test'])
+                torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
+                torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
             )
 
         prev_cell, prev_hidden = prev_state
@@ -209,8 +208,8 @@ class ConvLSTMCell(nn.Module):
         spatial_size = input_.data.size()[2:]
         state_size = [batch_size, self.hidden_size] + list(spatial_size)
         state = (
-            Variable(torch.zeros(state_size), volatile=(False, True)[self.phase == 'test']),
-            Variable(torch.zeros(state_size), volatile=(False, True)[self.phase == 'test'])
+            torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
+            torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
         )
         return state
 
@@ -224,16 +223,16 @@ class ConvGRUCell(nn.Module):
         self.ConvGates = nn.Conv2d(self.input_size + self.hidden_size, 2 * self.hidden_size, 3,
                                    padding=self.kernel_size // 2)
         self.Conv_ct = nn.Conv2d(self.input_size + self.hidden_size, self.hidden_size, 3, padding=self.kernel_size // 2)
-        dtype = torch.FloatTensor
+        # dtype = torch.FloatTensor
         self.phase = phase
 
     def forward(self, input, hidden):
         if hidden is None:
             size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
             if self.cuda_flag == True:
-                hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test']).cuda(), )
+                hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
             else:
-                hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase=='test']), )
+                hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test'])
         hidden = hidden[-1]
         c1 = self.ConvGates(torch.cat((F.dropout(input,p=0.2,training=(False,True)[self.phase=='train']), hidden), 1))
         (rt, ut) = c1.chunk(2, 1)
@@ -248,25 +247,28 @@ class ConvGRUCell(nn.Module):
     def init_state(self, input):
         size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
         if self.cuda_flag == True:
-            hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase == 'test']).cuda(),)
+            hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
         else:
-            hidden = (Variable(torch.zeros(size_h), volatile=(False, True)[self.phase == 'test']),)
+            hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test'])
         return hidden
 
 class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
-                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False, prior='v2',
+                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False, prior='v2', cuda=True,
                  refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
+        self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
+
         # TODO: implement __call__ in PriorBox
         if prior=='v2':
             self.priorbox = PriorBox(v2)
         elif prior=='v3':
             self.priorbox = PriorBox(v3)
-        self.priors = Variable(self.priorbox.forward(), volatile=True)
+        with torch.no_grad():
+            self.priors = self.priorbox.forward().to(self.device)
         self.size = size
         self.attention_flag = attention
         self.refine = refine
@@ -300,7 +302,7 @@ class TSSD(nn.Module):
         # self.identify = identify
         if phase == 'test': # or  self.identify:
             self.tub = tub
-            self.softmax = nn.Softmax()
+            self.softmax = nn.Softmax(dim=1)
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh,
                                  tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score)
             # if self.identify:
@@ -309,8 +311,9 @@ class TSSD(nn.Module):
     def forward(self, tx, state=None, init_tub=False):
         if self.phase == "train":
             if self.refine:
-                prior = self.priorbox.forward()
-                self.priors = Variable(prior.repeat(self.single_batch, 1,1), volatile=True)
+                with torch.no_grad():
+                    prior = self.priorbox.forward()
+                    self.priors = prior.repeat(self.single_batch, 1,1)
             rnn_state = [None] * 6
             seq_output = list()
             seq_sources = list()
@@ -420,25 +423,26 @@ class TSSD(nn.Module):
             loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
             conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
             if self.tub:
-                for a_idx, a in enumerate(a_map[:3]):
-                    if not a_idx:
-                        tub_tensor = a
-                        tub_tensor_size = a.size()[2:]
-                    else:
-                        tub_tensor = torch.cat((tub_tensor, F.upsample(a, tub_tensor_size, mode='bilinear')), dim=1)
+                with torch.no_grad():
+                    for a_idx, a in enumerate(a_map[:3]):
+                        if not a_idx:
+                            tub_tensor = a
+                            tub_tensor_size = a.size()[2:]
+                        else:
+                            tub_tensor = torch.cat((tub_tensor, F.upsample(a, tub_tensor_size, mode='bilinear', align_corners=True)), dim=1)
                 if init_tub:
                     self.detect.init_tubelets()
                 output = self.detect(
                     loc.view(loc.size(0), -1, 4),  # loc preds
                     self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                    self.priors.type(type(tx.data)),  # default boxes
+                    self.priors,  # default boxes
                     tub_tensor
                 )
             else:
                 output = self.detect(
                     loc.view(loc.size(0), -1, 4),  # loc preds
                     self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                    self.priors.type(type(tx.data)),  # default boxes
+                    self.priors,  # default boxes
                 )
 
             return output, state, tuple(a_map)
@@ -543,8 +547,8 @@ extras = {
     '512': [],
 }
 mbox = {
-    # '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-   '300': [5, 5, 5, 5, 5, 5],
+    '300v2': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    '300v3': [5, 5, 5, 5, 5, 5],
     # '300': [4, 4, 4, 4, 4, 4],
     '512': [],
 }
@@ -561,12 +565,12 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
     if tssd == 'ssd':
         return SSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                     add_extras(extras[str(size)], 512, batch_norm=bn),
-                                    mbox[str(size)], num_classes, phase=phase, batch_norm=bn), num_classes,
+                                    mbox[str(size)+prior], num_classes, phase=phase, batch_norm=bn), num_classes,
                    top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                 add_extras(extras[str(size)], 512),
-                                mbox[str(size)], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
+                                mbox[str(size)+prior], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
                     nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,identify=identify,
                     tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score
