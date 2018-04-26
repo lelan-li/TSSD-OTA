@@ -7,4 +7,4 @@ If you use this code for your research, please cite:
 
 **Xingyu Chen, Junzhi Yu, and Zhengxing Wu, TSSD: Temporal Single-Shot Object Detection Based on Attention-Aware LSTM, *arXiv:1803.00197*, 2018.**
 
-The useage will be update soon.
+The useage will be updated soon.
