@@ -93,6 +93,7 @@ ENV/
 
 # weights
 weights/
+weights040/
 
 #DS_Store
 .DS_Store

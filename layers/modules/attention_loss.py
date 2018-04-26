@@ -8,9 +8,9 @@ class AttentionLoss(nn.Module):
         super(AttentionLoss, self).__init__()
         self.criterion = nn.BCELoss().cuda() if cuda else nn.BCEWithLogitsLoss()
         if isinstance(dim, tuple):
-            self.upsample = nn.Upsample(dim, mode='bilinear')
+            self.upsample = nn.Upsample(dim, mode='bilinear', align_corners=True)
         else:
-            self.upsample = nn.Upsample((dim,dim), mode='bilinear')
+            self.upsample = nn.Upsample((dim,dim), mode='bilinear', align_corners=True)
         self.cuda = cuda
 
     def forward(self, att_map, masks=None, viz=False):
