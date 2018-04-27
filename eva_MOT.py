@@ -45,7 +45,7 @@ data_size = {'MOT17-02':600, 'MOT17-04':1050, 'MOT17-05':837, 'MOT17-09':525, 'M
              }
 
 model_dir='./weights/tssd300_MOT15_SAL222/ssd300_seqMOT15_4000.pth'
-# model_dir='./weights/ssd300_MOT1517_bn/ssd300_MOT15_80000.pth'
+# model_dir='./weights040/ssd300_MOT1517/ssd300_MOT15_35000.pth'
 data_path = '/home/sean/data/MOT/MOT17Det/train/'
 
 labelmap = MOT_CLASSES
@@ -69,7 +69,7 @@ refine = False
 tub = 10
 tub_thresh = 1
 tub_generate_score = 0.3
-tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)+'_test'
+tub_flag = '_t'+str(tub)+'s'+str(tub_thresh)+'g'+str(tub_generate_score)+''
 
 set_name = '2DMOT2015'
 if set_name == '2DMOT2015':
@@ -81,7 +81,7 @@ elif set_name == 'MOT17Det':
     # val_list = ['MOT17-01', 'MOT17-03', 'MOT17-06', 'MOT17-07', 'MOT17-08', 'MOT17-12', 'MOT17-14']
 
 output_flag = True
-output_dir = '/home/sean/data/MOT/motchallenge-devkit/motchallenge/res/%s/%s' % (set_name, model_dir.split('/')[2] + tub_flag)
+output_dir = '/home/sean/data/MOT/motchallenge-devkit/motchallenge/res/%s/%s' % (set_name+'_040', model_dir.split('/')[2] + tub_flag)
 if not os.path.exists(output_dir) and output_flag:
     os.mkdir(output_dir)
 
@@ -166,7 +166,7 @@ def main():
                     score = dets[0]
                     if score > confidence_threshold:
                         out.append([x_min, y_min, x_max, y_max, j - 1, score, identity])
-                        wf.write(str(frame_num)+','+str(int(identity))+','+str(x_min)+','+str(y_min)+','+str(x_max-x_min)+','+str(y_max-y_min)+','+str(np.around(score, decimals=2))+',-1,-1,-1\n')
+                        wf.write(str(frame_num)+','+str(int(identity))+','+str(x_min)+','+str(y_min)+','+str(x_max-x_min)+','+str(y_max-y_min)+','+str(np.around(float(score), decimals=2))+',-1,-1,-1\n')
             print(val + ':' + str(frame_num))
 
             if vis:

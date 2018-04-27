@@ -4,7 +4,6 @@ import torch.nn.functional as F
 # from torch.autograd import Variable
 from layers import *
 from data import v2, v3
-from data import v2 as cfg
 import os
 
 class SSD(nn.Module):
@@ -273,12 +272,6 @@ class TSSD(nn.Module):
         self.attention_flag = attention
         self.refine = refine
         self.single_batch = single_batch
-        if self.refine:
-            print('Temporal Refinement!')
-            self.variance = cfg['variance']
-            # if phase == 'train':
-            #     self.priors = [self.priors,] * single_batch
-
         # SSD network
         self.vgg = nn.ModuleList(base)
         self.conv4_3_layer = (23, 33)[len(self.vgg)>40]
