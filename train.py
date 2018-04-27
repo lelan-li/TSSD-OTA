@@ -234,7 +234,7 @@ def xavier(param):
     init.xavier_uniform_(param)
 
 def orthogonal(param):
-    init.orthogonal(param)
+    init.orthogonal_(param)
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
@@ -437,7 +437,7 @@ def train():
 
         loss.backward()
         if args.tssd != 'ssd':
-            nn.utils.clip_grad_norm(net.module.rnn.parameters(), 5)
+            nn.utils.clip_grad_norm_(net.module.rnn.parameters(), 5)
             optimizer_rnn.step()
         optimizer.step()
         t1 = time.time()
@@ -492,7 +492,7 @@ def train():
                 update='append'
             )
 
-        if iteration>0 and iteration % 5000 == 0:
+        if iteration>0 and iteration % 1000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))

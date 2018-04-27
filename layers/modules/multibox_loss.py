@@ -76,7 +76,6 @@ class MultiBoxLoss(nn.Module):
             conf_t = conf_t.to(self.device)
 
         pos = conf_t > 0
-        # num_pos = pos.sum(keepdim=True)
 
         # Localization Loss (Smooth L1)
         # Shape: [batch,num_priors,4]
@@ -91,9 +90,7 @@ class MultiBoxLoss(nn.Module):
         loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
 
         # Hard Negative Mining
-        # pos = pos.view(-1, 1)
-        pos_mask = pos.view(-1, 1)
-        loss_c[pos_mask] = 0  # filter out pos boxes for now
+        loss_c[pos.view(-1, 1)] = 0  # filter out pos boxes for now
         loss_c = loss_c.view(num, -1)
         _, loss_idx = loss_c.sort(1, descending=True)
         _, idx_rank = loss_idx.sort(1)
@@ -111,8 +108,8 @@ class MultiBoxLoss(nn.Module):
         # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
 
         N = num_pos.sum().float()
-        loss_l = loss_l /  N
-        loss_c = loss_c / N
+        loss_l /=  N
+        loss_c /=  N
         return loss_l, loss_c
 
 class seqMultiBoxLoss(nn.Module):
@@ -156,7 +153,6 @@ class seqMultiBoxLoss(nn.Module):
             else:
                 priors = priors[:loc_data.size(1), :]
                 num_priors = (priors.size(0))
-            num_classes = self.num_classes
 
             # match priors (default boxes) and ground truth boxes
             loc_t = torch.Tensor(num, num_priors, 4)
@@ -178,9 +174,7 @@ class seqMultiBoxLoss(nn.Module):
             # wrap targets
             loc_t = Variable(loc_t, requires_grad=False)
             conf_t = Variable(conf_t, requires_grad=False)
-
             pos = conf_t > 0
-            # num_pos = pos.sum(keepdim=True)
 
             # Localization Loss (Smooth L1)
             # Shape: [batch,num_priors,4]
@@ -195,7 +189,7 @@ class seqMultiBoxLoss(nn.Module):
             loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
 
             # Hard Negative Mining
-            loss_c[pos] = 0  # filter out pos boxes for now
+            loss_c[pos.view(-1, 1)] = 0  # filter out pos boxes for now
             loss_c = loss_c.view(num, -1)
             _, loss_idx = loss_c.sort(1, descending=True)
             _, idx_rank = loss_idx.sort(1)
@@ -210,12 +204,9 @@ class seqMultiBoxLoss(nn.Module):
             targets_weighted = conf_t[(pos+neg).gt(0)]
             loss_c = F.cross_entropy(conf_p, targets_weighted, size_average=False)
 
-
-            # conf_p_pos = conf_data[(pos_idx).gt(0)].view(-1, self.num_classes)
-            # targets_pos = conf_t[pos.gt(0)]
             # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
 
-            N = num_pos.data.sum()
+            N = num_pos.data.sum().float()
             seq_loss_l += loss_l / N
             seq_loss_c += loss_c / N
             ## consistency
@@ -253,30 +244,3 @@ class seqMultiBoxLoss(nn.Module):
 
         return seq_loss_l/len(seq_predictions), seq_loss_c/len(seq_predictions), loss_association/len(seq_predictions)
 
-        # if  self.association:
-        #     conf_data = F.softmax(conf_data.view(-1, self.num_classes)).view(num, -1, self.num_classes).data
-        #     self.output.zero_()
-        #     conf_preds = conf_data.view(num, num_priors,
-        #                                     self.num_classes).transpose(2, 1)
-        #     self.output = self.output.expand(num, self.num_classes, self.top_k).contiguous()
-        #
-        #     for i in range(num):
-        #         conf_scores = conf_preds[i].clone()
-        #         for cl in range(1, self.num_classes):
-        #             c_mask = conf_scores[cl].gt(self.conf_thresh)
-        #             scores = conf_scores[cl][c_mask]
-        #             if scores.dim() == 0:
-        #                 continue
-        #             scorted_score = scores.sort(0, descending=True)[0]
-        #             if scores.size(0) < self.top_k:
-        #                 self.output[i, cl, :scores.size(0)] = scorted_score
-        #             else:
-        #                 self.output[i, cl] = scorted_score[:self.top_k]
-        #     output_score = Variable(torch.sum(self.output, dim=2, keepdim=True), requires_grad=False)
-        #
-        #     if self.past_score is None:
-        #         self.past_score = Variable(torch.zeros(output_score.size()),requires_grad=False)
-        #     else:
-        #         loss_association += F.smooth_l1_loss(output_score, self.past_score, size_average=False)
-        #     self.past_score = (self.past_score * time_step  + output_score) / (time_step+1)
-        # pass
