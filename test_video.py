@@ -1,14 +1,14 @@
 import torch
 import torch.backends.cudnn as cudnn
-from data import base_transform, VID_CLASSES, VID_CLASSES_name, MOT_CLASSES
+from data import base_transform, VID_CLASSES, VID_CLASSES_name, MOT_CLASSES, UW_CLASSES
 from ssd import build_ssd
 from layers.modules import  AttentionLoss
 import os
 import numpy as np
 import cv2
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
-dataset_name = 'MOT15'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+dataset_name = 'UW'
 if dataset_name == 'VID2017':
     model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
     # model_dir='./weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
@@ -26,15 +26,22 @@ elif dataset_name == 'MOT15':
                 5:'ETH-Bahnhof.mp4', 6:'ETH-Crossing.mp4', 7:'ETH-Jelmoli.mp4', 8:'ETH-Linthescher.mp4', 9:'ETH-Pedcross2.mp4',
                 10:'ETH-Sunnyday.mp4', 11:'PETS09-S2L1.mp4', 12:'PETS09-S2L2.mp4', 13:'TUD-Campus.mp4', 14:'TUD-Crossing.mp4',
                 15:'TUD-Stadtmitte.mp4', 16:'Venice-1.mp4', 17:'Venice-2.mp4'}
-
     video_name = '/home/sean/data/MOT/snippets/'+all_list[7]
-
     labelmap = MOT_CLASSES
     num_classes = len(MOT_CLASSES) + 1
     prior = 'v3'
     confidence_threshold = 0.12
     nms_threshold = 0.3
     top_k = 400
+elif dataset_name == 'UW':
+    model_dir='./weights040/ssd300_UW/ssd300_UW_30000.pth'
+    labelmap = UW_CLASSES
+    num_classes = len(UW_CLASSES) + 1
+    prior = 'v2'
+    confidence_threshold = 0.3
+    nms_threshold = 0.3
+    top_k = 400
+    video_name='/home/sean/data/UWdevkit/Data/snippets/2_GAN_RS.mp4'
 
 else:
     raise ValueError("dataset [%s] not recognized." % dataset_name)
@@ -89,9 +96,9 @@ def main():
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     print(w, h)
+    size = (640, 480)
     if save_dir:
         fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
-        size = (640, 480)
         record = cv2.VideoWriter(os.path.join(save_dir,video_name.split('/')[-1].split('.')[0]+'_OTA.avi'), fourcc, cap.get(cv2.CAP_PROP_FPS), size)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
@@ -135,28 +142,37 @@ def main():
             att_target = up_attmap[0][0].cpu().data.numpy().transpose(1, 2, 0)
         for object in out:
             x_min, y_min, x_max, y_max, cls, score, identity = object
-            if identity in [34]:
-                color = (0, 0, 255)
-            elif identity in [35]:
-                color = (0, 200, 0)
-            elif identity in [58]:
-                color = (255, 0, 255)
-            # elif identity in [3]:
-            #     color = (255, 0, 255)
-            # elif identity in [4]:
-            #     color = (0, 128, 255)
-            # elif identity in [5]:
-            #     color = (255, 128, 128)
-            else:
-                color = (255, 0, 0)
+            if dataset_name in ['MOT15']:
+                put_str = str(int(identity))
+                if identity in [34]:
+                    color = (0, 0, 255)
+                elif identity in [35]:
+                    color = (0, 200, 0)
+                elif identity in [58]:
+                    color = (255, 0, 255)
+                # elif identity in [3]:
+                #     color = (255, 0, 255)
+                # elif identity in [4]:
+                #     color = (0, 128, 255)
+                # elif identity in [5]:
+                #     color = (255, 128, 128)
+                else:
+                    color = (255, 0, 0)
+            elif dataset_name in ['VID2017']:
+                put_str = str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2))
+            elif dataset_name in ['UW']:
+                put_str = str(int(identity))+':'+labelmap[cls] +':'+ str(np.around(score, decimals=2))
+                if cls == 0:
+                    color = (min(int(identity)+1, 255), 0, 255)
+                elif cls == 1:
+                    color = (255, min(int(identity)+1, 255), 0)
+                elif cls == 2:
+                    color = (min(int(identity)+1, 255), 128, 255)
+
             cv2.rectangle(frame_draw, (x_min, y_min), (x_max, y_max), color, thickness=2)
             cv2.fillConvexPoly(frame_draw, np.array(
                 [[x_min - 1, y_min], [x_min - 1, y_min - 50], [x_max + 1, y_min - 50], [x_max + 1, y_min]], np.int32),
                                color)
-            if dataset_name == 'VID2017':
-                put_str = str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2))
-            else:
-                put_str = str(int(identity))
 
             cv2.putText(frame_draw, put_str,
                         (x_min + 10, y_min - 10), cv2.FONT_HERSHEY_DUPLEX, 0.8, color=(255, 255, 255), thickness=1)
