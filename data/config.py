@@ -7,12 +7,14 @@ vocdir = os.path.join(home,"data/VOCdevkit/")
 viddir = os.path.join(home,"data/ILSVRC/")
 mot17detdir = os.path.join(home,"data/MOT/MOT17Det/")
 mot15dir = os.path.join(home,"data/MOT/2DMOT2015/")
+uwdir = os.path.join(home,"data/UWdevkit/")
 
 # note: if you used our download scripts, this should be right
 VOCroot = vocdir # path to VOCdevkit root dir
 VIDroot = viddir
 MOT17Detroot = mot17detdir
 MOT15root = mot15dir
+UWroot = uwdir
 
 # default batch size
 BATCHES = 32

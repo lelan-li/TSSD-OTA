@@ -44,7 +44,7 @@ data_size = {'MOT17-02':600, 'MOT17-04':1050, 'MOT17-05':837, 'MOT17-09':525, 'M
              'PETS09-S2L2':436, 'TUD-Crossing':201, 'Venice-1':450
              }
 
-model_dir='./weights/tssd300_MOT15_SAL222/ssd300_seqMOT15_4000.pth'
+model_dir='./weights040/tssd300_MOT15_SAL432/ssd300_seqMOT15_3000.pth'
 # model_dir='./weights040/ssd300_MOT1517/ssd300_MOT15_35000.pth'
 data_path = '/home/sean/data/MOT/MOT17Det/train/'
 

@@ -10,11 +10,10 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.autograd import Variable
-from data import VOCroot, VIDroot
-# from data import VOC_CLASSES as labelmap
+from data import VOCroot, VIDroot, UWroot
 import torch.utils.data as data
 
-from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name
+from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name, UW_CLASSES
 from ssd import build_ssd
 
 import sys
@@ -56,7 +55,6 @@ parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id', default='2,3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
-parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set prior box through time')
 parser.add_argument('--tub', default=0, type=int, help='tubelet max size')
 parser.add_argument('--tub_thresh', default=0.95, type=float, help='> : generate tubelet')
 parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : generate tubelet')
@@ -88,6 +86,12 @@ elif args.dataset_name == 'VID2017':
     imgsetpath = os.path.join(VIDroot, 'ImageSets', 'VID', '{:s}.txt')
     devkit_path = VIDroot[:-1]
     labelmap = VID_CLASSES
+elif args.dataset_name == 'UW':
+    annopath = os.path.join(UWroot, 'Annotations', set_type, '%s.xml')
+    imgpath = os.path.join(UWroot, 'Data', set_type, '%s.JPEG')
+    imgsetpath = os.path.join(UWroot, 'ImageSets', '{:s}.txt')
+    devkit_path = UWroot[:-1]
+    labelmap = UW_CLASSES
 
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
@@ -203,7 +207,10 @@ def do_python_eval(output_dir='output', use_07=True):
         prec = [prec] if isinstance(prec, float) else prec
         # rec_top = rec[args.top_k-1] if len(rec) > args.top_k else rec[-1]
         # prec_top = prec[args.top_k - 1] if len(prec) > args.top_k else prec[-1]
-        print('{} AP = {:.4f}, Rec = {:.4f}, Prec = {:.4f}'.format(VID_CLASSES_name[VID_CLASSES.index(cls)], ap, rec[-1], np.max(prec)))
+        if args.dataset_name in ['VID2017']:
+            print('{} AP = {:.4f}, Rec = {:.4f}, Prec = {:.4f}'.format(VID_CLASSES_name[VID_CLASSES.index(cls)], ap, rec[-1], np.max(prec)))
+        else:
+            print('{} AP = {:.4f}, Rec = {:.4f}, Prec = {:.4f}'.format(cls, ap, rec[-1], np.max(prec)))
         with open(os.path.join(output_dir, cls + '_pr.pkl'), 'wb') as f:
             pickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
     print('Mean AP = {:.4f}'.format(np.mean(aps)))
@@ -420,7 +427,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     all_time = 0.
     output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name+'_tub'+str(args.tub)+'_'+str(args.tub_thresh)+'_'+str(args.tub_generate_score))
     det_file = os.path.join(output_dir, 'detections.pkl')
-    state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
+    state = [None] * 6 if tssd in ['tblstm', 'gru'] else None
     pre_video_name = None
     for i in range(num_images):
         im, gt, h, w, _ = dataset.pull_item(i)
@@ -429,8 +436,9 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         img_id = dataset.pull_img_id(i)
         # print(img_id[1])
         video_name = img_id[1].split('/')[0]
+        print(video_name)
         if video_name != pre_video_name:
-            state = [None] * 6 if tssd in['lstm', 'edlstm','tblstm', 'tbedlstm', 'gru', 'outlstm'] else None
+            state = [None] * 6 if tssd in['tblstm', 'gru'] else None
             init_tub = True
             pre_video_name = video_name
         else:
@@ -455,10 +463,10 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
             dets = detections[0, j, :]
+            if dets.sum() == 0:
+                continue
             mask = dets[:, 0].gt(0.).expand(dets.size(-1), dets.size(0)).t()
             dets = torch.masked_select(dets, mask).view(-1, dets.size(-1))
-            if dets.dim() == 0:
-                continue
             boxes = dets[:, 1:-1] if dets.size(-1)==6 else dets[:, 1:]
             boxes[:, 0] *= w
             boxes[:, 2] *= w
@@ -486,22 +494,25 @@ def evaluate_detections(box_list, output_dir, dataset):
 
 if __name__ == '__main__':
     # load net
+    num_classes = len(labelmap) + 1  # +1 background
     if args.dataset_name == 'VOC0712':
-        num_classes = len(VOC_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VOCroot, [('2007', set_type)], BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name), dataset_name=args.dataset_name )
     elif args.dataset_name == 'VID2017':
-        num_classes = len(VID_CLASSES) + 1 # +1 background
         dataset = VOCDetection(VIDroot, set_type, BaseTransform(ssd_dim, dataset_mean),
                                AnnotationTransform(dataset_name=args.dataset_name),
                                dataset_name=args.dataset_name, set_file_name=args.set_file_name)
+    elif args.dataset_name == 'UW':
+        dataset = VOCDetection(UWroot, set_type, BaseTransform(ssd_dim, dataset_mean),
+                               AnnotationTransform(dataset_name=args.dataset_name),
+                               dataset_name=args.dataset_name, set_file_name=args.set_file_name)
+
     if args.detection:
         net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                        refine=args.refine,
                         tub=args.tub,
                         tub_thresh=args.tub_thresh,
                         tub_generate_score=args.tub_generate_score)

@@ -93,6 +93,7 @@ VID_CLASSES_name =(  # always index 0
     'zebra', #30 zebra
 )
 
+UW_CLASSES = ('seaurchin', 'scallop', 'seacucumber',)
 # for making bounding boxes pretty
 COLORS = ((255, 0, 0, 128), (0, 255, 0, 128), (0, 0, 255, 128),
           (0, 255, 255, 128), (255, 0, 255, 128), (255, 255, 0, 128))
@@ -114,12 +115,15 @@ class AnnotationTransform(object):
     def __init__(self, class_to_ind=None, keep_difficult=False, dataset_name='VOC0712'):
 
         self.dataset_name = dataset_name
-        if (self.dataset_name == 'VOC0712'):
+        if (self.dataset_name in ['VOC0712']):
             self.class_to_ind = class_to_ind or dict(
                zip(VOC_CLASSES, range(len(VOC_CLASSES))))
-        elif (self.dataset_name == 'VID2017' or 'seqVID2017'):
+        elif (self.dataset_name in ['VID2017' or 'seqVID2017']):
             self.class_to_ind = class_to_ind or dict(
                 zip(VID_CLASSES, range(len(VID_CLASSES))))
+        elif (self.dataset_name in ['UW' or 'seqUW']):
+            self.class_to_ind = class_to_ind or dict(
+                zip(UW_CLASSES, range(len(UW_CLASSES))))
         self.keep_difficult = keep_difficult
 
     def __call__(self, target, width, height, img_id=None):
@@ -132,12 +136,12 @@ class AnnotationTransform(object):
         """
         res = []
         for obj in target.iter('object'):
-            if self.dataset_name=='VOC0712':
+            if self.dataset_name in ['VOC0712']:
                 difficult = int(obj.find('difficult').text) == 1
                 if not self.keep_difficult and difficult:
                     continue
             name = obj.find('name').text.lower().strip()
-            if name not in VID_CLASSES:
+            if self.dataset_name in ['VID2017', 'seqVID2017'] and name not in VID_CLASSES:
                 continue
             bbox = obj.find('bndbox')
             pts = ['xmin', 'ymin', 'xmax', 'ymax']
@@ -204,11 +208,19 @@ class VOCDetection(data.Dataset):
                 self.ids.append((rootpath, pos[0][:-1])) if len(pos)==1 else self.ids.append((rootpath, pos[0]))
                 if self.name == 'seqVID2017':
                     self.video_size.append(int(pos[1][:-1]))
-
+        elif self.name in ['UW', 'seqUW']:
+            self._annopath = os.path.join('%s', 'Annotations', image_sets, '%s.xml')
+            self._imgpath = os.path.join('%s', 'Data', image_sets, '%s.jpg')
+            rootpath = self.root[:-1]
+            for line in open(os.path.join(rootpath, 'ImageSets', set_file_name + '.txt')):
+                pos = line.split(' ')
+                self.ids.append((rootpath, pos[0][:-1])) if len(pos) == 1 else self.ids.append((rootpath, pos[0]))
+                if self.name == 'seqUW':
+                    self.video_size.append(int(pos[1][:-1]))
 
     def __getitem__(self, index):
 
-        if self.name == 'seqVID2017':
+        if self.name in ['seqVID2017', 'seqUW']:
             im_list, gt_list, maskroi_list = self.pull_seqitem(index)
             return im_list, gt_list, maskroi_list
         else:
@@ -319,7 +331,6 @@ class VOCDetection(data.Dataset):
 
     def pull_item(self, index):
         img_id = self.ids[index]
-
         target = ET.parse(self._annopath % img_id).getroot()
         img = cv2.imread(self._imgpath % img_id)
         height, width, channels = img.shape
@@ -329,6 +340,7 @@ class VOCDetection(data.Dataset):
             target = self.target_transform(target, width, height, img_id)
             if len(target) == 0:
                 # target = np.array(target)
+                # print(img_id)
                 img,_,_ = self.transform(img)
                 img = img[:, :, (2, 1, 0)]
                 return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
