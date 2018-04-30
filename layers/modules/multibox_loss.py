@@ -134,7 +134,7 @@ class seqMultiBoxLoss(nn.Module):
             self.top_k = top_k
             self.conf_thresh = conf_thresh
             self.nms_thresh = nms_thresh
-            self.output = torch.zeros(1, self.num_classes, self.top_k, 5)
+            self.output = torch.zeros(1, self.num_classes, self.top_k, 5).cuda()
             self.past_score = None
 
     def forward(self, seq_predictions, targets):
@@ -211,7 +211,7 @@ class seqMultiBoxLoss(nn.Module):
             seq_loss_c += loss_c / N
             ## consistency
             if self.association:
-                conf_data = F.softmax(conf_data.view(-1, self.num_classes)).view(num, -1, self.num_classes).data
+                conf_data = F.softmax(conf_data.view(-1, self.num_classes), dim=1).view(num, -1, self.num_classes)
                 self.output.zero_()
                 conf_preds = conf_data.view(num, num_priors,
                                             self.num_classes).transpose(2, 1)
@@ -225,7 +225,7 @@ class seqMultiBoxLoss(nn.Module):
                     for cl in range(1, self.num_classes):
                         c_mask = conf_scores[cl].gt(self.conf_thresh)
                         scores = conf_scores[cl][c_mask]
-                        if scores.dim() == 0:
+                        if scores.size(0) == 0:
                             continue
                         l_mask = c_mask.unsqueeze(1).expand_as(decoded_boxes)
                         boxes = decoded_boxes[l_mask].view(-1, 4)
@@ -234,13 +234,14 @@ class seqMultiBoxLoss(nn.Module):
                         self.output[i, cl, :count] = \
                             torch.cat((scores[ids[:count]].unsqueeze(1),
                                        boxes[ids[:count]]), 1)
-                output_score = Variable(torch.sum(self.output, dim=2, keepdim=True)[:, :, :, 0], requires_grad=False)
+                with torch.no_grad():
+                    output_score = torch.sum(self.output, dim=2, keepdim=True)[:, :, :, 0]
 
-                if self.past_score is None:
-                    self.past_score = Variable(torch.zeros(output_score.size()), requires_grad=False)
-                else:
-                    loss_association += F.smooth_l1_loss(output_score, self.past_score, size_average=False)
-                self.past_score = (self.past_score * time_step + output_score) / (time_step + 1)
+                    if self.past_score is None:
+                        self.past_score = torch.zeros(output_score.size()).cuda()
+                    else:
+                        loss_association += F.smooth_l1_loss(output_score, self.past_score, size_average=False)
+                    self.past_score = (self.past_score * time_step + output_score) / (time_step + 1)
 
         return seq_loss_l/len(seq_predictions), seq_loss_c/len(seq_predictions), loss_association/len(seq_predictions)
 

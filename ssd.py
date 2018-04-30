@@ -212,6 +212,55 @@ class ConvLSTMCell(nn.Module):
         )
         return state
 
+class ConvJANET(nn.Module):
+    """
+    Generate a convolutional JANET cell
+    """
+
+    def __init__(self, input_size, hidden_size, phase='train'):
+        super(ConvJANET, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.Gates = nn.Conv2d(input_size + hidden_size, 2 * hidden_size, 3, padding=1)
+        self.phase = phase
+
+    def forward(self, input_, prev_state):
+
+        # get batch and spatial sizes
+        batch_size = input_.data.size()[0]
+        spatial_size = input_.data.size()[2:]
+
+        # generate empty prev_state, if None is provided
+        if prev_state is None:
+            state_size = [batch_size, self.hidden_size] + list(spatial_size)
+            prev_state = (torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
+
+        prev_cell = prev_state[-1]
+        # data size is [batch, channel, height, width]
+        stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), prev_cell), 1)
+        # stacked_inputs = torch.cat((input_, prev_hidden), 1)
+        gates = self.Gates(stacked_inputs)
+
+        # chunk across channel dimension
+        remember_gate, cell_gate = gates.chunk(2, 1)
+
+        # apply sigmoid non linearity
+        remember_gate = F.sigmoid(remember_gate)
+        # apply tanh non linearity
+        cell_gate = F.tanh(cell_gate)
+
+        # compute current cell and hidden state
+        cell = (remember_gate * prev_cell) + ((1-remember_gate) * cell_gate)
+
+        return (cell, )
+
+    def init_state(self, input_):
+        batch_size = input_.data.size()[0]
+        spatial_size = input_.data.size()[2:]
+        state_size = [batch_size, self.hidden_size] + list(spatial_size)
+        state = (torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
+        return state
+
 class ConvGRUCell(nn.Module):
     def __init__(self, input_size, hidden_size, kernel_size=3, cuda_flag=True, phase='train'):
         super(ConvGRUCell, self).__init__()
@@ -222,17 +271,14 @@ class ConvGRUCell(nn.Module):
         self.ConvGates = nn.Conv2d(self.input_size + self.hidden_size, 2 * self.hidden_size, 3,
                                    padding=self.kernel_size // 2)
         self.Conv_ct = nn.Conv2d(self.input_size + self.hidden_size, self.hidden_size, 3, padding=self.kernel_size // 2)
-        # dtype = torch.FloatTensor
         self.phase = phase
 
-    def forward(self, input, hidden):
-        if hidden is None:
+    def forward(self, input, pre_state):
+        if pre_state is None:
             size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
-            if self.cuda_flag == True:
-                hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-            else:
-                hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test'])
-        hidden = hidden[-1]
+            pre_state = (torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
+
+        hidden = pre_state[-1]
         c1 = self.ConvGates(torch.cat((F.dropout(input,p=0.2,training=(False,True)[self.phase=='train']), hidden), 1))
         (rt, ut) = c1.chunk(2, 1)
         reset_gate = F.sigmoid(rt)
@@ -245,11 +291,8 @@ class ConvGRUCell(nn.Module):
 
     def init_state(self, input):
         size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
-        if self.cuda_flag == True:
-            hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-        else:
-            hidden = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test'])
-        return hidden
+        state = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
+        return state
 
 class TSSD(nn.Module):
 
@@ -288,18 +331,12 @@ class TSSD(nn.Module):
         if self.attention_flag:
             in_channel = 512
             self.attention = nn.ModuleList([ConvAttention(in_channel*2), ConvAttention(in_channel)])
-                                            # ConvAttention(in_channel*2), ConvAttention(in_channel),
-                                            # ConvAttention(in_channel), ConvAttention(in_channel)])
             print(self.attention)
-            # print('oa ratio: ', self.o_ratio, self.a_ratio)
-        # self.identify = identify
-        if phase == 'test': # or  self.identify:
+        if phase == 'test':
             self.tub = tub
             self.softmax = nn.Softmax(dim=1)
             self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh,
                                  tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score)
-            # if self.identify:
-            #     self.ide = Identify()
 
     def forward(self, tx, state=None, init_tub=False):
         if self.phase == "train":
