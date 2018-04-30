@@ -118,10 +118,10 @@ class AnnotationTransform(object):
         if (self.dataset_name in ['VOC0712']):
             self.class_to_ind = class_to_ind or dict(
                zip(VOC_CLASSES, range(len(VOC_CLASSES))))
-        elif (self.dataset_name in ['VID2017' or 'seqVID2017']):
+        elif (self.dataset_name in ['VID2017', 'seqVID2017', 'VIDDET']):
             self.class_to_ind = class_to_ind or dict(
                 zip(VID_CLASSES, range(len(VID_CLASSES))))
-        elif (self.dataset_name in ['UW' or 'seqUW']):
+        elif (self.dataset_name in ['UW', 'seqUW']):
             self.class_to_ind = class_to_ind or dict(
                 zip(UW_CLASSES, range(len(UW_CLASSES))))
         self.keep_difficult = keep_difficult
@@ -274,13 +274,15 @@ class VOCDetection(data.Dataset):
             target_list, img_list = [ET.parse(self._annopath % (video_id[0], img_name)).getroot() for img_name in img_name], \
                                     [cv2.imread(self._imgpath % (video_id[0], img_name)) for img_name in img_name]
 
+            for img in img_list:
+                if img is None:
+                    print(img_name)
 
         return target_list, img_list
 
     def pull_seqitem(self, index):
         video_id = self.ids[index]
         video_size = self.video_size[index]
-
         target_list, img_list = self.select_clip(video_id, video_size)
         maskroi_list = list()
 

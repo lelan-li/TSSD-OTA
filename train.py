@@ -51,6 +51,7 @@ parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh fo
 parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 2.0], help='coefficients for loc, conf, att, asso')
 parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
 parser.add_argument('--bn', default=False, type=str2bool, help='select sequence data in a skip way')
+parser.add_argument('--save_interval', default=5000, type=int, help='frequency of checkpoint saving')
 
 args = parser.parse_args()
 
@@ -100,7 +101,7 @@ elif args.dataset_name=='UW':
     num_classes = len(UW_CLASSES) + 1
     data_root = UWroot
 elif args.dataset_name == 'seqUW':
-    train_sets = 'train_video'
+    train_sets = 'train'
     num_classes = len(UW_CLASSES) + 1
     data_root = UWroot
 else:
@@ -458,13 +459,14 @@ def train():
                 update='append'
             )
 
-        if iteration>0 and iteration % 10000 == 0:
+        if iteration>0 and iteration % args.save_interval == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))
     torch.save(ssd_net.state_dict(),
                os.path.join(args.save_folder, 'ssd' + str(ssd_dim) + '_' + args.dataset_name + '_' +
                             repr(iteration) + '.pth'))
+    print('Complet Training. Saving state, iter:', iteration)
 
 def adjust_learning_rate(optimizer, gamma, step):
     """Sets the learning rate to the initial LR decayed by 10 at every specified step

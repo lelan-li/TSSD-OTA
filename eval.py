@@ -6,12 +6,8 @@
 
 from __future__ import print_function
 import torch
-import torch.nn as nn
 import torch.backends.cudnn as cudnn
-import torchvision.transforms as transforms
-from torch.autograd import Variable
 from data import VOCroot, VIDroot, UWroot
-import torch.utils.data as data
 
 from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name, UW_CLASSES
 from ssd import build_ssd
@@ -22,7 +18,6 @@ import time
 import argparse
 import numpy as np
 import pickle
-import cv2
 
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
@@ -54,7 +49,6 @@ parser.add_argument('--detection', default='no', type=str2bool, help='detection 
 parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id', default='2,3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
-parser.add_argument('--oa_ratio', nargs='+', type=float, default=[0.0,1.0], help='step_list for learning rate')
 parser.add_argument('--tub', default=0, type=int, help='tubelet max size')
 parser.add_argument('--tub_thresh', default=0.95, type=float, help='> : generate tubelet')
 parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : generate tubelet')
@@ -430,33 +424,29 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     state = [None] * 6 if tssd in ['tblstm', 'gru'] else None
     pre_video_name = None
     for i in range(num_images):
+
         im, gt, h, w, _ = dataset.pull_item(i)
         # if len(gt) == 0:
         #     continue
         img_id = dataset.pull_img_id(i)
         # print(img_id[1])
         video_name = img_id[1].split('/')[0]
-        print(video_name)
         if video_name != pre_video_name:
             state = [None] * 6 if tssd in['tblstm', 'gru'] else None
             init_tub = True
             pre_video_name = video_name
         else:
             init_tub = False
-
-        x = Variable(im.unsqueeze(0))
-        if args.cuda:
-            x = x.cuda()
-        if tssd == 'ssd':
-            _t['im_detect'].tic()
-            detections,_ = net(x)
-            detect_time = _t['im_detect'].toc(average=False)
-            detections = detections.data
-        else:
-            _t['im_detect'].tic()
-            detections, state, _ = net(x, state, init_tub)
-            detect_time = _t['im_detect'].toc(average=False)
-            detections = detections.data
+        with torch.no_grad():
+            x = im.unsqueeze(0).cuda()
+            if tssd == 'ssd':
+                _t['im_detect'].tic()
+                detections,_ = net(x)
+                detect_time = _t['im_detect'].toc(average=False)
+            else:
+                _t['im_detect'].tic()
+                detections, state, _ = net(x, state, init_tub)
+                detect_time = _t['im_detect'].toc(average=False)
         if i>10:
             all_time += detect_time
 
