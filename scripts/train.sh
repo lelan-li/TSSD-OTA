@@ -1,5 +1,5 @@
 type='tblstm_vid'
-if [ $type = 'ssd' ]
+if [ $type = 'ssd_mot' ]
 then
     python ../train.py \
     --lr 0.0001 \
@@ -16,18 +16,43 @@ then
     --dataset_name 'MOT15' \
     --set_file_name 'train' \
     --augm_type 'ssd' \
-    --num_workers 2 \
+    --num_workers 8 \
     --tssd 'ssd' \
     --attention 'no' \
     --association 'no' \
     --loss_coe 1.0 1.0 0.5 2.0 \
     --freeze 0 \
     --bn 'no' \
-    --basenet 'vgg16_reducedfc_512.pth'
-#    --resume '../weights040/MOT/ssd300_MOT/ssd300_MOT_40000.pth' \
-#    --start_iter 40000
-#    --resume '../weights/ssd300_MOT1517_bn/ssd300_MOT15_50000.pth' \
-#    --resume_from_ssd '../weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth' \
+    --basenet 'vgg16_reducedfc_512.pth' \
+    --resume '../weights040/MOT/ssd300_MOT1517/ssd300_MOT15_15000.pth' \
+    --start_iter 15000
+elif [ $type = 'ssd_uw' ]
+then
+    python ../train.py \
+    --lr 0.0001 \
+    --gamma 0.1 \
+    --momentum 0.9 \
+    --visdom 'yes' \
+    --send_images_to_visdom 'no' \
+    --save_folder '../weights040/UW/ssd300_UW' \
+    --step_list 40000 60000 80000 \
+    --save_interval 10000 \
+    --batch_size 64 \
+    --ssd_dim 300 \
+    --gpu_ids '2,3' \
+    --dataset_name 'UW' \
+    --set_file_name 'train' \
+    --augm_type 'ssd' \
+    --num_workers 8 \
+    --tssd 'ssd' \
+    --attention 'no' \
+    --association 'no' \
+    --loss_coe 1.0 1.0 0.5 2.0 \
+    --freeze 0 \
+    --bn 'no' \
+    --basenet 'vgg16_reducedfc_512.pth' \
+    --resume '../weights040/UW/ssd300_UW/ssd300_UW_40000.pth' \
+    --start_iter 40000
 elif [ $type = 'tblstm_vid' ]
 then
     python ../train.py \
