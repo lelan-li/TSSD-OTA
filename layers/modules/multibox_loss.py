@@ -68,7 +68,7 @@ class MultiBoxLoss(nn.Module):
         for idx in range(num):
             truths = targets[idx][:, :-1]
             labels = targets[idx][:, -1]
-            defaults = priors.data
+            defaults = priors
             match(self.threshold, truths, defaults, self.variance, labels,
                   loc_t, conf_t, idx)
         with torch.no_grad():
@@ -159,12 +159,12 @@ class seqMultiBoxLoss(nn.Module):
             conf_t = torch.LongTensor(num, num_priors)
 
             for idx in range(num):
-                truths = targets[idx][time_step][:, :-1].data
-                labels = targets[idx][time_step][:, -1].data
+                truths = targets[idx][time_step][:, :-1]
+                labels = targets[idx][time_step][:, -1]
                 if priors.dim() == 3:
-                    defaults = priors[idx].data
+                    defaults = priors[idx]
                 else:
-                    defaults = priors.data
+                    defaults = priors
                 match(self.threshold, truths, defaults, self.variance, labels,
                       loc_t, conf_t, idx)
 
@@ -206,7 +206,7 @@ class seqMultiBoxLoss(nn.Module):
 
             # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
 
-            N = num_pos.data.sum().float()
+            N = num_pos.sum().float()
             seq_loss_l += loss_l / N
             seq_loss_c += loss_c / N
             ## consistency
@@ -219,7 +219,7 @@ class seqMultiBoxLoss(nn.Module):
 
                 # Decode predictions into bboxes.
                 for i in range(num):
-                    decoded_boxes = decode(loc_data[i].data, defaults, self.variance)
+                    decoded_boxes = decode(loc_data[i], defaults, self.variance)
                     # For each class, perform nms
                     conf_scores = conf_preds[i].clone()
                     for cl in range(1, self.num_classes):

@@ -1,9 +1,7 @@
 import torch
 import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
-from data import base_transform, VID_CLASSES, VID_CLASSES_name, MOT_CLASSES
+from data import base_transform, MOT_CLASSES
 from ssd import build_ssd
-from layers.modules import  AttentionLoss
 import os
 import numpy as np
 import cv2
@@ -44,7 +42,7 @@ data_size = {'MOT17-02':600, 'MOT17-04':1050, 'MOT17-05':837, 'MOT17-09':525, 'M
              'PETS09-S2L2':436, 'TUD-Crossing':201, 'Venice-1':450
              }
 
-model_dir='./weights040/tssd300_MOT15_CALA_ori222/ssd300_seqMOT15_20.pth'
+model_dir='./weights040/MOT/tssd300_MOT15_CALA_ori222/ssd300_seqMOT15_20.pth'
 # model_dir='./weights040/ssd300_MOT1517/ssd300_MOT15_35000.pth'
 data_path = '/home/sean/data/MOT/MOT17Det/train/'
 
@@ -58,7 +56,7 @@ nms_threshold =0.3
 top_k=400
 ssd_dim=300
 vis = False
-if model_dir.split('/')[2].split('_')[0][0]=='t':
+if model_dir.split('/')[-2].split('_')[0][0]=='t':
     tssd = 'tblstm'
     attention = True
 else:

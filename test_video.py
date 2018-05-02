@@ -34,7 +34,8 @@ elif dataset_name == 'MOT15':
     nms_threshold = 0.3
     top_k = 400
 elif dataset_name == 'UW':
-    model_dir='./weights040/ssd300_UW/ssd300_UW_30000.pth'
+    model_dir='./weights040/UW/tssd300_seqUW_SAL_816/ssd300_seqUW_3000.pth'
+    # model_dir='./weights040/UW/ssd300_UW/ssd300_UW_30000.pth'
     labelmap = UW_CLASSES
     num_classes = len(UW_CLASSES) + 1
     prior = 'v2'
@@ -48,7 +49,7 @@ else:
 
 model_name= 'ssd300'
 ssd_dim=300
-if model_dir.split('/')[2].split('_')[0][0]=='t':
+if model_dir.split('/')[-2].split('_')[0][0]=='t':
     tssd = 'tblstm'
     attention = True
 else:
