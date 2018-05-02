@@ -33,3 +33,7 @@ Set `type='tblstm_vid'` in `scripts/train.sh`, then
 cd scripts
 ./train.sh
 ```
+
+## Key components
+1. The network is defined in `ssd.py`, namely `class TSSD`.
+2. The loss function is writted in `layers/modules/multibox_loss.py`, i.e., `class seqMultiBoxLoss`
