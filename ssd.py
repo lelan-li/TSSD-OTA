@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# from torch.autograd import Variable
 from layers import *
 from data import v2, v3
 import os
@@ -167,8 +166,8 @@ class ConvLSTMCell(nn.Module):
     def forward(self, input_, prev_state):
 
         # get batch and spatial sizes
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
+        batch_size = input_.size()[0]
+        spatial_size = input_.size()[2:]
 
         # generate empty prev_state, if None is provided
         if prev_state is None:
@@ -203,8 +202,8 @@ class ConvLSTMCell(nn.Module):
         return cell, hidden
 
     def init_state(self, input_):
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
+        batch_size = input_.size()[0]
+        spatial_size = input_.size()[2:]
         state_size = [batch_size, self.hidden_size] + list(spatial_size)
         state = (
             torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
@@ -227,8 +226,8 @@ class ConvJANET(nn.Module):
     def forward(self, input_, prev_state):
 
         # get batch and spatial sizes
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
+        batch_size = input_.size()[0]
+        spatial_size = input_.size()[2:]
 
         # generate empty prev_state, if None is provided
         if prev_state is None:
@@ -255,8 +254,8 @@ class ConvJANET(nn.Module):
         return (cell, )
 
     def init_state(self, input_):
-        batch_size = input_.data.size()[0]
-        spatial_size = input_.data.size()[2:]
+        batch_size = input_.size()[0]
+        spatial_size = input_.size()[2:]
         state_size = [batch_size, self.hidden_size] + list(spatial_size)
         state = (torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
         return state
@@ -275,7 +274,7 @@ class ConvGRUCell(nn.Module):
 
     def forward(self, input, pre_state):
         if pre_state is None:
-            size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
+            size_h = [input.size()[0], self.hidden_size] + list(input.size()[2:])
             pre_state = (torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
 
         hidden = pre_state[-1]
@@ -290,7 +289,7 @@ class ConvGRUCell(nn.Module):
         return (next_h, )
 
     def init_state(self, input):
-        size_h = [input.data.size()[0], self.hidden_size] + list(input.data.size()[2:])
+        size_h = [input.size()[0], self.hidden_size] + list(input.size()[2:])
         state = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
         return state
 

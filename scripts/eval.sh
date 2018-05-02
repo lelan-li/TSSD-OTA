@@ -1,12 +1,7 @@
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
-type='tblstm'
-set_file_name='val'
-detection='yes'
-gpu_id='1'
-attention='yes'
-dataset_name='VID2017'
+type='tblstm_vid'
 if [ $type = 'ssd' ]
 then
     python ../eval.py \
@@ -18,47 +13,48 @@ then
     --nms_threshold $nms_thresh \
     --top_k $top_k \
     --ssd_dim 300 \
-    --set_file_name $set_file_name \
-    --dataset_name $dataset_name \
+    --set_file_name 'test' \
+    --dataset_name 'UW' \
     --tssd $type \
-    --gpu_id $gpu_id \
-    --detection $detection \
-    --attention $attention
-elif [ $type = 'tblstm' ]
+    --gpu_id '1' \
+    --detection 'yes' \
+    --attention 'no'
+elif [ $type = 'tblstm_vid' ]
 then
     python ../eval.py \
-    --model_dir '../weights040/VID/tssd300_VID2017_SAL_812' \
-    --model_name 'ssd300' \
-    --literation 10000 \
-    --save_folder '../eval' \
-    --confidence_threshold $conf_thresh \
-    --nms_threshold $nms_thresh \
-    --top_k $top_k \
-    --ssd_dim 300 \
-    --set_file_name $set_file_name \
-    --dataset_name $dataset_name \
-    --tssd $type \
-    --gpu_id $gpu_id \
-    --detection $detection \
-    --attention 'yes' \
-    --tub 0 \
-    --tub_thresh 0.95 \
-    --tub_generate_score 0.5
-elif [ $type = 'gru' ]
-then
-    python ../eval.py \
-    --model_dir '../weights/tssd300_VID2017_b8s8_DRSkipAttGru_Drop2Clip5_FixVggExtraPreLocConf' \
-    --model_name 'ssd300' \
+    --model_dir '../weights040/VID/tssd300_VID2017_SALd15_816' \
     --literation 25000 \
     --save_folder '../eval' \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
     --top_k $top_k \
     --ssd_dim 300 \
-    --set_file_name $set_file_name \
+    --set_file_name 'val' \
     --dataset_name 'VID2017' \
+    --tssd 'tblstm' \
+    --gpu_id '1' \
+    --detection 'yes' \
+    --attention 'yes' \
+    --tub 0 \
+    --tub_thresh 0.95 \
+    --tub_generate_score 0.5
+elif [ $type = 'tblstm_uw' ]
+then
+    python ../eval.py \
+    --model_dir '../weights040/UW/tssd300_seqUW_SAL_816' \
+    --literation 15000 \
+    --save_folder '../eval' \
+    --confidence_threshold $conf_thresh \
+    --nms_threshold $nms_thresh \
+    --top_k $top_k \
+    --ssd_dim 300 \
+    --set_file_name 'test' \
+    --dataset_name 'UW' \
     --tssd $type \
-    --gpu_id $gpu_id \
-    --detection $detection \
-    --attention $attention
+    --gpu_id '3' \
+    --detection 'yes' \
+    --attention 'yes' \
+    --tub 0 \
+    --tub_thresh 0.95 \
+    --tub_generate_score 0.5
 fi
