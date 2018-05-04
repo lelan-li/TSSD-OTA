@@ -7,7 +7,7 @@ import os
 import numpy as np
 import cv2
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 dataset_name = 'UW'
 if dataset_name == 'VID2017':
     model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
@@ -34,15 +34,15 @@ elif dataset_name == 'MOT15':
     nms_threshold = 0.3
     top_k = 400
 elif dataset_name == 'UW':
-    model_dir='./weights040/UW/tssd300_seqUW_SAL_816/ssd300_seqUW_3000.pth'
+    model_dir='./weights040/UW/tssd300_UW_SAL_816/ssd300_seqUW_5000.pth'
     # model_dir='./weights040/UW/ssd300_UW/ssd300_UW_30000.pth'
     labelmap = UW_CLASSES
     num_classes = len(UW_CLASSES) + 1
     prior = 'v2'
-    confidence_threshold = 0.3
+    confidence_threshold = 0.4
     nms_threshold = 0.3
     top_k = 400
-    video_name='/home/sean/data/UWdevkit/Data/snippets/2_GAN_RS.mp4'
+    video_name='/home/sean/data/UWdevkit/Data/snippets/o20_6.wmv'#_GAN_RS.mp4'
 
 else:
     raise ValueError("dataset [%s] not recognized." % dataset_name)
@@ -92,7 +92,7 @@ def main():
     net = net.cuda()
     cudnn.benchmark = True
 
-    frame_num = 0
+    frame_num = 9900
     cap = cv2.VideoCapture(video_name)
     w, h = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
@@ -162,13 +162,13 @@ def main():
             elif dataset_name in ['VID2017']:
                 put_str = str(int(identity))+':'+VID_CLASSES_name[cls] +':'+ str(np.around(score, decimals=2))
             elif dataset_name in ['UW']:
-                put_str = str(int(identity))+':'+labelmap[cls] +':'+ str(np.around(score, decimals=2))
+                put_str = str(int(identity))
                 if cls == 0:
                     color = (min(int(identity)+1, 255), 0, 255)
                 elif cls == 1:
                     color = (255, min(int(identity)+1, 255), 0)
                 elif cls == 2:
-                    color = (min(int(identity)+1, 255), 128, 255)
+                    color = (min(int(identity)+1, 255), 128, 0)
 
             cv2.rectangle(frame_draw, (x_min, y_min), (x_max, y_max), color, thickness=2)
             cv2.fillConvexPoly(frame_draw, np.array(

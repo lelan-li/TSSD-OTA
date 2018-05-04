@@ -1,13 +1,13 @@
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
-type='ssd'
+type='tblstm_uw'
 if [ $type = 'ssd' ]
 then
     python ../eval.py \
     --model_dir '../weights040/UW/ssd300_UW' \
     --model_name ssd300 \
-    --literation 50000 \
+    --literation 80000 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
@@ -16,7 +16,7 @@ then
     --set_file_name 'test' \
     --dataset_name 'UW' \
     --tssd $type \
-    --gpu_id '1' \
+    --gpu_id '2' \
     --detection 'yes' \
     --attention 'no'
 elif [ $type = 'tblstm_vid' ]
@@ -41,8 +41,8 @@ then
 elif [ $type = 'tblstm_uw' ]
 then
     python ../eval.py \
-    --model_dir '../weights040/UW/ssd300_seqUW_SAL_816' \
-    --literation 15000 \
+    --model_dir '../weights040/UW/tssd300_UW_SAL_816' \
+    --literation 6000 \
     --save_folder '../eval' \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \

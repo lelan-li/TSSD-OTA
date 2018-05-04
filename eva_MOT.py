@@ -42,8 +42,8 @@ data_size = {'MOT17-02':600, 'MOT17-04':1050, 'MOT17-05':837, 'MOT17-09':525, 'M
              'PETS09-S2L2':436, 'TUD-Crossing':201, 'Venice-1':450
              }
 
-model_dir='./weights040/MOT/tssd300_MOT15_CALA_ori222/ssd300_seqMOT15_20.pth'
-# model_dir='./weights040/ssd300_MOT1517/ssd300_MOT15_35000.pth'
+model_dir='./weights040/MOT/tssd300_MOT15_SAL_420/ssd300_seqMOT15_4000.pth'
+# model_dir='./weights040/MOT/ssd300_MOT1517/ssd300_MOT15_20000.pth'
 data_path = '/home/sean/data/MOT/MOT17Det/train/'
 
 labelmap = MOT_CLASSES
@@ -79,7 +79,7 @@ elif set_name == 'MOT17Det':
     # val_list = ['MOT17-01', 'MOT17-03', 'MOT17-06', 'MOT17-07', 'MOT17-08', 'MOT17-12', 'MOT17-14']
 
 output_flag = True
-output_dir = '/home/sean/data/MOT/motchallenge-devkit/motchallenge/res/%s/%s' % (set_name+'_040', model_dir.split('/')[2] + tub_flag)
+output_dir = '/home/sean/data/MOT/motchallenge-devkit/motchallenge/res/%s/%s' % (set_name+'_040', model_dir.split('/')[3] + tub_flag)
 if not os.path.exists(output_dir) and output_flag:
     os.mkdir(output_dir)
 
