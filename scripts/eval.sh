@@ -4,7 +4,7 @@ nms_thresh=0.45
 top_k=200
 set_file_name='val'
 detection='yes'
-gpu_id='1'
+gpu_id='0'
 attention='yes'
 if [ $type = 'ssd' ]
 then
@@ -26,7 +26,7 @@ then
 elif [ $type = 'tblstm' ]
 then
     pythonc3 ../eval.py \
-    --model_dir '../weights/tssd300_VID2017_b8s8_RContiAttTBLstm75Asso9_baseDrop2Clip5_FixVggExtraPreLocConf25000' \
+    --model_dir '../weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000' \
     --model_name 'ssd300' \
     --literation 5000 \
     --save_folder '../eval' \

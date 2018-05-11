@@ -13,10 +13,40 @@ from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss
 from ssd import build_ssd
 import numpy as np
 import time
+import logging
+
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
+def print_log(args):
+    if args.resume:
+        logging.info('resume: '+ args.resume )
+        logging.info('start_iter: '+ str(args.start_iter))
+    elif args.resume_from_ssd:
+        logging.info('resume_from_ssd: '+ args.resume_from_ssd )
+    else:
+        logging.info('load pre-trained vgg: '+ args.basenet )
+    logging.info('freeze: '+ str(args.freeze))
+    logging.info('lr: '+ str(args.lr))
+    logging.info('gamam: '+ str(args.gamma))
+    logging.info('step_list: '+ str(args.step_list))
+    logging.info('save_interval: '+ str(args.save_interval))
+    logging.info('dataset_name: '+ args.dataset_name )
+    logging.info('set_file_name: '+ args.set_file_name )
+    logging.info('gpu_ids: '+ args.gpu_ids)
+    logging.info('augm_type: '+ args.augm_type)
+    logging.info('ssd_dim: '+ str(args.ssd_dim))
+    logging.info('batch_size: '+ str(args.batch_size))
+    logging.info('seq_len: '+ str(args.seq_len))
+    logging.info('skip: '+ str(args.skip))
+    logging.info('tssd: '+ args.tssd )
+    logging.info('attention: '+ str(args.attention))
+    logging.info('association: '+ str(args.association))
+    if args.association:
+        logging.info('asso_top_k: '+ str(args.asso_top_k))
+        logging.info('asso_conf: '+ str(args.asso_conf))
+    logging.info('loss weights: '+ str(args.loss_coe))
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Training')
 parser.add_argument('--version', default='v2', help='conv11_2(v2) or pool6(v1) as last layer')
 parser.add_argument('--basenet', default='vgg16_reducedfc_512.pth', help='pretrained base model')
@@ -33,13 +63,14 @@ parser.add_argument('--cuda', default=True, type=str2bool, help='Use cuda to tra
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float, help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='Weight decay for SGD')
-parser.add_argument('--gamma', default=3, type=float, help='Gamma update for SGD')
+parser.add_argument('--gamma', default=0.1, type=float, help='Gamma update for SGD')
 parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss at each iteration')
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='./weights/test', help='Location to save checkpoint models')
 parser.add_argument('--dataset_name', default='MOT15', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
+parser.add_argument('--save_interval', default=5000, type=int, help='frequency of saving checkpoint')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
@@ -58,7 +89,24 @@ parser.add_argument('--bn', default=False, type=str2bool, help='select sequence 
 
 args = parser.parse_args()
 
-os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
+if not os.path.exists(args.save_folder):
+    os.mkdir(args.save_folder)
+
+current_time = time.strftime("%b_%d_%H:%M:%S_%Y", time.localtime())
+logging.basicConfig(level=logging.DEBUG,
+                format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+                datefmt='%a, %d %b %Y %H:%M:%S',
+                filename=os.path.join(args.save_folder, current_time+'.log'),
+                filemode='w')
+
+console = logging.StreamHandler()
+console.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+console.setFormatter(formatter)
+logging.getLogger('').addHandler(console)
+print_log(args)
+
+os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_ids
 
 if args.cuda and torch.cuda.is_available():
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
@@ -72,9 +120,6 @@ if args.dataset_name in ['MOT15', 'seqMOT15']:
 else:
     prior = 'v2'
     cfg = v2
-
-if not os.path.exists(args.save_folder):
-    os.mkdir(args.save_folder)
 
 if args.dataset_name=='VOC0712':
     train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
@@ -447,8 +492,10 @@ def train():
         t1 = time.time()
 
         if iteration % 10 == 0:
-            print('Timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data[0]), end=' ')
+            # print('Timer: %.4f sec.' % (t1 - t0))
+            # print('iter ' + repr(iteration) + ' || Loss: %.4f || lr: %.5f' % (loss.data[0], optimizer.param_groups[0]['lr']), end=' ')
+            logging.info('iter ' + repr(iteration) + '||Loss: %.4f, lr: %.5f||Timer: %.4f sec.' % (loss.data[0], optimizer.param_groups[0]['lr'], t1 - t0))
+
             if args.visdom and args.send_images_to_visdom:
                 random_batch_index = np.random.randint(images.size(0))
                 if images.dim() == 5:

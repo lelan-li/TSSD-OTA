@@ -468,8 +468,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             cls_dets = np.hstack((boxes.cpu().numpy(), scores[:, np.newaxis])) \
                 .astype(np.float32, copy=False)
             all_boxes[j][i] = cls_dets
-        # if i % (int(num_images / 1000)) == 0:
-        print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
+        if i % (int(num_images / 3)) == 0:
+            print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
     print('all time:', all_time)
     with open(det_file, 'wb') as f:

@@ -132,3 +132,4 @@ comp/
 arch/
 OTA/
 *.pdf
+weights040/
