@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers import *
-from data import v2, v3
+from data import VOC_VGG16_300, MOT_VGG16_300, VOC_VGG16_512
 import os
 
 class SSD(nn.Module):
@@ -22,20 +22,23 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2', cuda=True):
+    def __init__(self, phase, base, extras, head, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2', cuda=True):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         self.attention_flag = attention
         self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
         # TODO: implement __call__ in PriorBox
-        if prior=='v2':
-            self.priorbox = PriorBox(v2)
-        elif prior=='v3':
-            self.priorbox = PriorBox(v3)
+        if prior=='VOC_VGG16_300':
+            self.priorbox = PriorBox(VOC_VGG16_300)
+        elif prior=='MOT_VGG16_300':
+            self.priorbox = PriorBox(MOT_VGG16_300)
+        elif prior=='VOC_VGG16_512':
+            self.priorbox = PriorBox(VOC_VGG16_512)
+
         with torch.no_grad():
             self.priors = self.priorbox.forward().to(self.device)
-        self.size = 300
+        self.size = size
 
         # SSD network
         self.vgg = nn.ModuleList(base)
@@ -304,10 +307,13 @@ class TSSD(nn.Module):
         self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
 
         # TODO: implement __call__ in PriorBox
-        if prior=='v2':
-            self.priorbox = PriorBox(v2)
-        elif prior=='v3':
-            self.priorbox = PriorBox(v3)
+        if prior=='VOC_VGG16_300':
+            self.priorbox = PriorBox(VOC_VGG16_300)
+        elif prior=='MOT_VGG16_300':
+            self.priorbox = PriorBox(MOT_VGG16_300)
+        elif prior=='VOC_VGG16_512':
+            self.priorbox = PriorBox(VOC_VGG16_512)
+
         with torch.no_grad():
             self.priors = self.priorbox.forward().to(self.device)
         self.size = size
@@ -516,7 +522,7 @@ def vgg(cfg, i, batch_norm=False):
     return layers
 
 
-def add_extras(cfg, i, batch_norm=False):
+def add_extras(cfg, i, batch_norm=False, size=300):
     # Extra layers added to VGG for feature scaling
     layers = []
     in_channels = i
@@ -538,6 +544,9 @@ def add_extras(cfg, i, batch_norm=False):
                     layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag])]
             flag = not flag
         in_channels = v
+    if size == 512:
+        layers.append(nn.Conv2d(in_channels, 128, kernel_size=1, stride=1))
+        layers.append(nn.Conv2d(128, 256, kernel_size=4, stride=1, padding=1))
     return layers
 
 def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train', batch_norm=False):
@@ -568,38 +577,37 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train', batc
 base = {
     '300': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
             512, 512, 512], # output channel
-    '512': [],
+    '512': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
+            512, 512, 512],
 }
 extras = {
     '300': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
-    # '300': [256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512],
-    '512': [],
+    '512': [256, 'S', 512, 128, 'S', 256, 128, 'S', 256, 128, 'S', 256],
 }
 mbox = {
-    '300v2': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-    '300v3': [5, 5, 5, 5, 5, 5],
-    # '300': [4, 4, 4, 4, 4, 4],
-    '512': [],
+    'VOC_VGG16_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    'MOT_VGG16_300': [5, 5, 5, 5, 5, 5],
+    'VOC_VGG16_512': [6, 6, 6, 6, 6, 4, 4],
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='v2', bn=False,
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_VGG16_300', bn=False,
               nms_thresh=0.45, attention=False, refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
-    if size != 300:
+    if size not in [300, 512]:
         print("Error: Sorry only SSD300 is supported currently!")
         return
     if tssd == 'ssd':
         return SSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                     add_extras(extras[str(size)], 512, batch_norm=bn),
-                                    mbox[str(size)+prior], num_classes, phase=phase, batch_norm=bn), num_classes,
+                                    mbox[prior], num_classes, phase=phase, batch_norm=bn), num_classes,size=size,
                    top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                 add_extras(extras[str(size)], 512),
-                                mbox[str(size)+prior], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
+                                mbox[prior], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
                     nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,identify=identify,
                     tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score

@@ -5,7 +5,7 @@ from torch.autograd import Function
 from torch.autograd import Variable
 import torch.nn.functional as F
 from ..box_utils import decode, nms, IoU, cos_similarity, any_same_idx
-from data import v2 as cfg
+from data import VOC_VGG16_300 as cfg
 import numpy as np
 import collections
 import cv2

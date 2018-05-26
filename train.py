@@ -6,10 +6,10 @@ import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import argparse
 import torch.utils.data as data
-from data import v2, v3, AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, MOT15root, UWroot, VOC_CLASSES, VID_CLASSES, UW_CLASSES
+from data import AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, MOT15root, UWroot, VOC_CLASSES, VID_CLASSES, UW_CLASSES
 from utils.augmentations import SSDAugmentation, seqSSDAugmentation
 from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss
-from ssd import build_ssd
+from model import build_ssd
 import numpy as np
 import time
 import logging
@@ -67,7 +67,8 @@ parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, hel
 parser.add_argument('--save_folder', default='./weights040/test', help='Location to save checkpoint models')
 parser.add_argument('--dataset_name', default='UW', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
-parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
+parser.add_argument('--backbone', default='VGG16', type=str, help='Backbone')
+parser.add_argument('--ssd_dim', default=512, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
@@ -105,11 +106,9 @@ os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
 device = torch.device('cuda' if args.cuda and torch.cuda.is_available() else 'cpu')
 
 if args.dataset_name in ['MOT15', 'seqMOT15']:
-    prior = 'v3'
-    cfg = v3
+    prior = 'MOT_'+ args.backbone + '_' + str(args.ssd_dim)
 else:
-    prior = 'v2'
-    cfg = v2
+    prior = 'VOC_'+ args.backbone + '_' + str(args.ssd_dim)
 
 if args.dataset_name=='VOC0712':
     train_sets = [('2007', 'trainval'), ('2012', 'trainval')]

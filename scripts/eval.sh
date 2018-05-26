@@ -1,11 +1,11 @@
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
-type='tblstm_uw'
+type='ssd'
 if [ $type = 'ssd' ]
 then
     python ../eval.py \
-    --model_dir '../weights040/UW/ssd300_UW' \
+    --model_dir '../weights040/UW/ssd300_UW_Att' \
     --model_name ssd300 \
     --literation 80000 \
     --save_folder ../eval \
@@ -18,7 +18,7 @@ then
     --tssd $type \
     --gpu_id '2' \
     --detection 'yes' \
-    --attention 'no'
+    --attention 'yes'
 elif [ $type = 'tblstm_vid' ]
 then
     python ../eval.py \

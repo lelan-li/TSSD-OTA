@@ -1,4 +1,4 @@
-type='tblstm_mot'
+type='ssd_uw'
 if [ $type = 'ssd_mot' ]
 then
     python ../train.py \
@@ -34,12 +34,12 @@ then
     --momentum 0.9 \
     --visdom 'yes' \
     --send_images_to_visdom 'no' \
-    --save_folder '../weights040/UW/ssd300_UW' \
-    --step_list 40000 60000 80000 \
+    --save_folder '../weights040/UW/ssd512_UW' \
+    --step_list 30000 40000 50000 \
     --save_interval 10000 \
     --batch_size 64 \
-    --ssd_dim 300 \
-    --gpu_ids '2,3' \
+    --ssd_dim 512 \
+    --gpu_ids '0,1,2,3' \
     --dataset_name 'UW' \
     --set_file_name 'train' \
     --augm_type 'ssd' \
@@ -50,9 +50,10 @@ then
     --loss_coe 1.0 1.0 0.5 2.0 \
     --freeze 0 \
     --bn 'no' \
-    --basenet 'vgg16_reducedfc_512.pth' \
-    --resume '../weights040/UW/ssd300_UW/ssd300_UW_40000.pth' \
-    --start_iter 40000
+    --backbone 'VGG16' \
+    --basenet 'vgg16_reducedfc_512.pth'
+#    --resume '../weights040/UW/ssd300_UW/ssd300_UW_40000.pth' \
+#    --start_iter 40000
 elif [ $type = 'tblstm_vid' ]
 then
     python -m torch.utils.bottleneck ../train.py \
