@@ -300,7 +300,7 @@ class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
                  top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False, prior='v2', cuda=True,
-                 refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
+                 tub=0, tub_thresh=1.0, tub_generate_score=0.7):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -318,8 +318,6 @@ class TSSD(nn.Module):
             self.priors = self.priorbox.forward().to(self.device)
         self.size = size
         self.attention_flag = attention
-        self.refine = refine
-        self.single_batch = single_batch
         # SSD network
         self.vgg = nn.ModuleList(base)
         self.conv4_3_layer = (23, 33)[len(self.vgg)>40]
@@ -345,10 +343,6 @@ class TSSD(nn.Module):
 
     def forward(self, tx, state=None, init_tub=False):
         if self.phase == "train":
-            if self.refine:
-                with torch.no_grad():
-                    prior = self.priorbox.forward()
-                    self.priors = prior.repeat(self.single_batch, 1,1)
             rnn_state = [None] * 6
             seq_output = list()
             seq_sources = list()
@@ -592,7 +586,7 @@ mbox = {
 
 
 def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_VGG16_300', bn=False,
-              nms_thresh=0.45, attention=False, refine=False, single_batch=4, identify=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
+              nms_thresh=0.45, attention=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -601,14 +595,14 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
         return
     if tssd == 'ssd':
         return SSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
-                                    add_extras(extras[str(size)], 512, batch_norm=bn),
+                                    add_extras(extras[str(size)], 512, batch_norm=bn, size=size),
                                     mbox[prior], num_classes, phase=phase, batch_norm=bn), num_classes,size=size,
                    top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
-                                add_extras(extras[str(size)], 512),
+                                add_extras(extras[str(size)], 512, size=size),
                                 mbox[prior], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
-                    nms_thresh=nms_thresh, attention=attention, refine=refine, single_batch=single_batch,identify=identify,
+                    nms_thresh=nms_thresh, attention=attention,
                     tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score
                     )

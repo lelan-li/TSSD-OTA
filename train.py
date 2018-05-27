@@ -18,10 +18,13 @@ def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
 def print_log(args):
+    logging.info('model_name: '+ args.model_name)
+    logging.info('ssd_dim: '+ str(args.ssd_dim))
+    logging.info('Backbone: '+ args.backbone)
     if args.resume:
         logging.info('resume: '+ args.resume )
         logging.info('start_iter: '+ str(args.start_iter))
-    elif args.resume_from_ssd:
+    elif args.resume_from_ssd != 'ssd':
         logging.info('resume_from_ssd: '+ args.resume_from_ssd )
     else:
         logging.info('load pre-trained vgg: '+ args.basenet )
@@ -34,16 +37,16 @@ def print_log(args):
     logging.info('set_file_name: '+ args.set_file_name )
     logging.info('gpu_ids: '+ args.gpu_ids)
     logging.info('augm_type: '+ args.augm_type)
-    logging.info('ssd_dim: '+ str(args.ssd_dim))
     logging.info('batch_size: '+ str(args.batch_size))
-    logging.info('seq_len: '+ str(args.seq_len))
-    logging.info('skip: '+ str(args.skip))
-    logging.info('tssd: '+ args.tssd )
     logging.info('attention: '+ str(args.attention))
-    logging.info('association: '+ str(args.association))
-    if args.association:
-        logging.info('asso_top_k: '+ str(args.asso_top_k))
-        logging.info('asso_conf: '+ str(args.asso_conf))
+    logging.info('tssd: '+ args.tssd )
+    if args.tssd != 'ssd':
+        logging.info('seq_len: '+ str(args.seq_len))
+        logging.info('skip: '+ str(args.skip))
+        logging.info('association: '+ str(args.association))
+        if args.association:
+            logging.info('asso_top_k: '+ str(args.asso_top_k))
+            logging.info('asso_conf: '+ str(args.asso_conf))
     logging.info('loss weights: '+ str(args.loss_coe))
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Training')
@@ -68,6 +71,7 @@ parser.add_argument('--save_folder', default='./weights040/test', help='Location
 parser.add_argument('--dataset_name', default='UW', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--backbone', default='VGG16', type=str, help='Backbone')
+parser.add_argument('--model_name', default='ssd', type=str, help='which model selected')
 parser.add_argument('--ssd_dim', default=512, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
@@ -169,11 +173,12 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn,
-                    single_batch=int(args.batch_size/len(args.gpu_ids.split(','))))
+ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn)
+                   # single_batch=int(args.batch_size/len(args.gpu_ids.split(','))))
 net = ssd_net
 
-if args.cuda:
+# if args.cuda and torch.cuda.is_available():
+if device==torch.device('cuda'):
     net = torch.nn.DataParallel(ssd_net)
     cudnn.benchmark = True
 
@@ -350,7 +355,7 @@ if args.tssd in ['gru', 'tblstm']:
                               lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
     if args.freeze != 3:
         optimizer_rnn = optim.RMSprop(net.module.rnn.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda,
+        criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device,
                                 association=args.association, top_k=args.asso_top_k, conf_thresh=args.asso_conf)
         print('loss coefficients:', args.loss_coe)
 
@@ -363,7 +368,7 @@ else:
                                {'params': net.module.loc.parameters()},
                                {'params': net.module.conf.parameters()}],
                                lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, args.cuda)
+    criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device)
 if args.attention:
     att_criterion = AttentionLoss(args.ssd_dim)
 
@@ -435,11 +440,9 @@ def train():
         else:
             loss_l, loss_c = criterion(out, targets)
         optimizer.zero_grad()
+        loss += args.loss_coe[0] * loss_l + args.loss_coe[1] * loss_c
         if args.association:
-            loss += args.loss_coe[0]*loss_l + args.loss_coe[1]*loss_c + args.loss_coe[3]*loss_asso
-        else:
-            # loss_l, loss_c = criterion(out, targets)
-            loss += args.loss_coe[0]*loss_l + args.loss_coe[1]*loss_c
+            loss += args.loss_coe[3]*loss_asso
         if args.attention:
             loss_att, upsampled_att_map = att_criterion(att,masks)
             loss += args.loss_coe[2]*loss_att
@@ -503,12 +506,12 @@ def train():
                 update='append',
             )
 
-        if iteration>0 and iteration % args.save_interval == 0:
+        if iteration % args.save_interval == 0:
             print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
+            torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, args.model_name+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))
     torch.save(ssd_net.state_dict(),
-               os.path.join(args.save_folder, 'ssd' + str(ssd_dim) + '_' + args.dataset_name + '_' +
+               os.path.join(args.save_folder, args.model_name + str(ssd_dim) + '_' + args.dataset_name + '_' +
                             repr(iteration) + '.pth'))
     print('Complet Training. Saving state, iter:', iteration)
 

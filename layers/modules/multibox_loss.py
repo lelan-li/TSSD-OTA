@@ -31,9 +31,9 @@ class MultiBoxLoss(nn.Module):
 
     def __init__(self, num_classes, overlap_thresh, prior_for_matching,
                  bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
-                 cuda=True):
+                 device=torch.device('cpu')):
         super(MultiBoxLoss, self).__init__()
-        self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
+        self.device = device
         self.num_classes = num_classes
         self.threshold = overlap_thresh
         self.background_label = bkg_label
@@ -86,7 +86,6 @@ class MultiBoxLoss(nn.Module):
 
         # Compute max conf across batch for hard negative mining
         batch_conf = conf_data.view(-1, self.num_classes)
-
         loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
 
         # Hard Negative Mining
@@ -115,10 +114,10 @@ class MultiBoxLoss(nn.Module):
 class seqMultiBoxLoss(nn.Module):
 
     def __init__(self, num_classes, overlap_thresh, prior_for_matching,
-                 bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
-                 use_gpu=True, refine=False, association=False, top_k=2, conf_thresh=0.1, nms_thresh=0.45):
+                 bkg_label, neg_mining, neg_pos, neg_overlap, encode_target, device=torch.device('cpu'),
+                 association=False, top_k=2, conf_thresh=0.1, nms_thresh=0.45):
         super(seqMultiBoxLoss, self).__init__()
-        self.use_gpu = use_gpu
+        self.device = device
         self.num_classes = num_classes
         self.threshold = overlap_thresh
         self.background_label = bkg_label
@@ -128,13 +127,12 @@ class seqMultiBoxLoss(nn.Module):
         self.negpos_ratio = neg_pos
         self.neg_overlap = neg_overlap
         self.variance = cfg['variance']
-        self.refine = refine
         self.association = association
         if self.association:
             self.top_k = top_k
             self.conf_thresh = conf_thresh
             self.nms_thresh = nms_thresh
-            self.output = torch.zeros(1, self.num_classes, self.top_k, 5).cuda()
+            self.output = torch.zeros(1, self.num_classes, self.top_k, 5).to(self.device)
             self.past_score = None
 
     def forward(self, seq_predictions, targets):
@@ -168,9 +166,8 @@ class seqMultiBoxLoss(nn.Module):
                 match(self.threshold, truths, defaults, self.variance, labels,
                       loc_t, conf_t, idx)
 
-            if self.use_gpu:
-                loc_t = loc_t.cuda()
-                conf_t = conf_t.cuda()
+                loc_t = loc_t.to(self.device)
+                conf_t = conf_t.to(self.device)
             # wrap targets
             loc_t = Variable(loc_t, requires_grad=False)
             conf_t = Variable(conf_t, requires_grad=False)
@@ -238,7 +235,7 @@ class seqMultiBoxLoss(nn.Module):
                     output_score = torch.sum(self.output, dim=2, keepdim=True)[:, :, :, 0]
 
                     if self.past_score is None:
-                        self.past_score = torch.zeros(output_score.size()).cuda()
+                        self.past_score = torch.zeros(output_score.size()).to(self.device)
                     else:
                         loss_association += F.smooth_l1_loss(output_score, self.past_score, size_average=False)
                     self.past_score = (self.past_score * time_step + output_score) / (time_step + 1)

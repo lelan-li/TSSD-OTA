@@ -5,20 +5,21 @@ type='ssd'
 if [ $type = 'ssd' ]
 then
     python ../eval.py \
-    --model_dir '../weights040/UW/ssd300_UW_Att' \
-    --model_name ssd300 \
-    --literation 80000 \
+    --model_dir '../weights040/UW/ssd512_UW' \
+    --model_name ssd \
+    --ssd_dim 512 \
+    --literation 0 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
     --top_k $top_k \
-    --ssd_dim 300 \
+    --backbone VGG16 \
     --set_file_name 'test' \
     --dataset_name 'UW' \
     --tssd $type \
-    --gpu_id '2' \
+    --gpu_id '3' \
     --detection 'yes' \
-    --attention 'yes'
+    --attention 'no'
 elif [ $type = 'tblstm_vid' ]
 then
     python ../eval.py \

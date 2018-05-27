@@ -1,7 +1,7 @@
 import torch
 import torch.backends.cudnn as cudnn
 from data import base_transform, VID_CLASSES, VID_CLASSES_name, MOT_CLASSES, UW_CLASSES
-from ssd import build_ssd
+from model import build_ssd
 from layers.modules import  AttentionLoss
 import os
 import numpy as np
@@ -9,6 +9,12 @@ import cv2
 
 os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 dataset_name = 'UW'
+backbone = 'VGG16'
+ssd_dim=300
+tub = 10
+tub_thresh = 1
+tub_generate_score = 0.1
+
 if dataset_name == 'VID2017':
     model_dir='./weights/tssd300_VID2017_b8s8_RContiAttTBLstmAsso75_baseDrop2Clip5_FixVggExtraPreLocConf20000/ssd300_seqVID2017_5000.pth'
     # model_dir='./weights/ssd300_VIDDET_512/ssd300_VIDDET_5000.pth'
@@ -29,7 +35,7 @@ elif dataset_name == 'MOT15':
     video_name = '/home/sean/data/MOT/snippets/'+all_list[7]
     labelmap = MOT_CLASSES
     num_classes = len(MOT_CLASSES) + 1
-    prior = 'v3'
+    prior = 'VOC_' + backbone + '_' + str(ssd_dim)
     confidence_threshold = 0.12
     nms_threshold = 0.3
     top_k = 400
@@ -38,7 +44,7 @@ elif dataset_name == 'UW':
     # model_dir='./weights040/UW/ssd300_UW/ssd300_UW_30000.pth'
     labelmap = UW_CLASSES
     num_classes = len(UW_CLASSES) + 1
-    prior = 'v2'
+    prior = 'VOC_' + backbone + '_' + str(ssd_dim)
     confidence_threshold = 0.4
     nms_threshold = 0.3
     top_k = 400
@@ -47,19 +53,12 @@ elif dataset_name == 'UW':
 else:
     raise ValueError("dataset [%s] not recognized." % dataset_name)
 
-model_name= 'ssd300'
-ssd_dim=300
 if model_dir.split('/')[-2].split('_')[0][0]=='t':
     tssd = 'tblstm'
     attention = True
 else:
     tssd = 'ssd'
     attention = False
-
-refine = False
-tub = 10
-tub_thresh = 1
-tub_generate_score = 0.1
 
 # save_dir = os.path.join('./demo/OTA', video_name.split('/')[-1].split('.')[0]+'_040')
 save_dir = None
@@ -80,7 +79,6 @@ def main():
                     nms_thresh=nms_threshold,
                     attention=attention,
                     prior=prior,
-                    refine=refine,
                     tub = tub,
                     tub_thresh = tub_thresh,
                     tub_generate_score=tub_generate_score)

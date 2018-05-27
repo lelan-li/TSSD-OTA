@@ -10,7 +10,7 @@ import torch.backends.cudnn as cudnn
 from data import VOCroot, VIDroot, UWroot
 
 from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name, UW_CLASSES
-from ssd import build_ssd
+from model import build_ssd
 
 import sys
 import os
@@ -28,7 +28,7 @@ def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detection')
-parser.add_argument('--model_name', default='ssd300',
+parser.add_argument('--model_name', default='ssd',
                     type=str, help='Trained state_dict file path to open')
 parser.add_argument('--save_folder', default='../eval', type=str,
                     help='File path to save results')
@@ -42,6 +42,7 @@ parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use cuda to train model')
 parser.add_argument('--dataset_name', default='VID2017', help='Which dataset')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
+parser.add_argument('--backbone', default='VGG16', type=str, help='Backbone')
 parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
 parser.add_argument('--literation', default='20000', type=str,help='File path to save results')
 parser.add_argument('--model_dir', default='../weights/tssd300_VID2017_b4_s16_SkipShare_preVggExtraLocConf', type=str,help='Path to save model')
@@ -56,6 +57,9 @@ parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : g
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
+device = torch.device('cuda' if args.cuda and torch.cuda.is_available() else 'cpu')
+if args.cuda and torch.cuda.is_available():
+    cudnn.benchmark = True
 
 if not os.path.exists(args.save_folder):
     os.mkdir(args.save_folder)
@@ -86,6 +90,7 @@ elif args.dataset_name == 'UW':
     imgsetpath = os.path.join(UWroot, 'ImageSets', '{:s}.txt')
     devkit_path = UWroot[:-1]
     labelmap = UW_CLASSES
+prior = 'VOC_' + args.backbone + '_' + str(args.ssd_dim)
 
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
@@ -94,9 +99,9 @@ if args.model_dir.split('/')[-1] in ['ssd300_VIDDET', 'ssd300_VIDDET_186', 'ssd3
     trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation +'.pth')
 else:
     if args.tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm']:
-        trained_model = os.path.join(args.model_dir, args.model_name+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth')
+        trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth')
     else:
-        trained_model = os.path.join(args.model_dir, args.model_name+'_' + args.dataset_name +'_'+ args.literation +'.pth')
+        trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + args.dataset_name +'_'+ args.literation +'.pth')
 
 class Timer(object):
     """A simple timer."""
@@ -405,8 +410,7 @@ cachedir: Directory for caching the annotations
 
     return rec, prec, ap
 
-
-def test_net(save_folder, net, cuda, dataset, transform, top_k,
+def test_net(save_folder, net, dataset, transform, top_k,
              im_size=300, thresh=0.05, tssd='ssd'):
     """Test a Fast R-CNN network on an image database."""
     num_images = len(dataset)
@@ -424,12 +428,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     state = [None] * 6 if tssd in ['tblstm', 'gru'] else None
     pre_video_name = None
     for i in range(num_images):
-
         im, gt, h, w, _ = dataset.pull_item(i)
-        # if len(gt) == 0:
-        #     continue
         img_id = dataset.pull_img_id(i)
-        # print(img_id[1])
         video_name = img_id[1].split('/')[0]
         if video_name != pre_video_name:
             state = [None] * 6 if tssd in['tblstm', 'gru'] else None
@@ -438,7 +438,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         else:
             init_tub = False
         with torch.no_grad():
-            x = im.unsqueeze(0).cuda()
+            x = im.unsqueeze(0).to(device)
             if tssd == 'ssd':
                 _t['im_detect'].tic()
                 detections,_ = net(x)
@@ -499,6 +499,7 @@ if __name__ == '__main__':
 
     if args.detection:
         net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
+                        prior=prior,
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
@@ -511,11 +512,9 @@ if __name__ == '__main__':
         net.eval()
         print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
         # load data
-        if args.cuda:
-            net = net.cuda()
-            cudnn.benchmark = True
+        net = net.to(device)
         # evaluation
-        test_net(args.save_folder, net, args.cuda, dataset,
+        test_net(args.save_folder, net, dataset,
                  BaseTransform(net.size, dataset_mean), args.top_k, ssd_dim,
                  thresh=args.confidence_threshold, tssd=args.tssd)
     else:
