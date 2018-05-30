@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from layers import *
 from data import VOC_VGG16_300, MOT_VGG16_300, VOC_VGG16_512
 import os
+from .backbone import vgg, add_extras, ConvAttention, ConvLSTMCell, ConvGRUCell
 
 class SSD(nn.Module):
     """Single Shot Multibox Architecture
@@ -22,12 +23,12 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2', cuda=True):
+    def __init__(self, phase, base, extras, head, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2', device=torch.device('cuda')):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         self.attention_flag = attention
-        self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
+        self.device = device
         # TODO: implement __call__ in PriorBox
         if prior=='VOC_VGG16_300':
             self.priorbox = PriorBox(VOC_VGG16_300)
@@ -41,12 +42,12 @@ class SSD(nn.Module):
         self.size = size
 
         # SSD network
-        self.vgg = nn.ModuleList(base)
-        self.conv4_3_layer = (23, 33)[len(self.vgg)>40]
+        self.backbone = nn.ModuleList(base)
+        self.conv4_3_layer = (23, 33)[len(self.backbone)>40]
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
-        self.extras_skip = (2, 3)[len(self.vgg)>40]
+        self.extras_skip = (2, 3)[len(self.backbone)>40]
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
         if self.attention_flag:
@@ -84,13 +85,13 @@ class SSD(nn.Module):
         a_map = list()
         # apply vgg up to conv4_3 relu
         for k in range(self.conv4_3_layer):
-            x = self.vgg[k](x)
+            x = self.backbone[k](x)
         s = self.L2Norm(x)
         sources.append(s)
 
         # apply vgg up to fc7
-        for k in range(self.conv4_3_layer, len(self.vgg)):
-            x = self.vgg[k](x)
+        for k in range(self.conv4_3_layer, len(self.backbone)):
+            x = self.backbone[k](x)
         sources.append(x)
 
         # apply extra layers and cache source layer outputs
@@ -135,176 +136,15 @@ class SSD(nn.Module):
         else:
             print('Sorry only .pth and .pkl files supported.')
 
-class ConvAttention(nn.Module):
-
-    def __init__(self, inchannel):
-        super(ConvAttention, self).__init__()
-        self.attention = nn.Sequential(
-            nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.LeakyReLU(0.2),
-            # nn.ConvTranspose2d(int(inchannel/2), int(inchannel/4), kernel_size=3, stride=2, padding=1, output_padding=0, bias=False),
-            nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(inchannel, 1, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.Sigmoid()
-        )
-    def forward(self, feats):
-        return self.attention(feats)
-
-
-
-# https://www.jianshu.com/p/72124b007f7d
-class ConvLSTMCell(nn.Module):
-    """
-    Generate a convolutional LSTM cell
-    """
-
-    def __init__(self, input_size, hidden_size, phase='train'):
-        super(ConvLSTMCell, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.Gates = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, 3, padding=1)
-        self.phase = phase
-
-    def forward(self, input_, prev_state):
-
-        # get batch and spatial sizes
-        batch_size = input_.size()[0]
-        spatial_size = input_.size()[2:]
-
-        # generate empty prev_state, if None is provided
-        if prev_state is None:
-            state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            prev_state = (
-                torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-                torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-            )
-
-        prev_cell, prev_hidden = prev_state
-        # prev_hidden_drop = F.dropout(prev_hidden, training=(False, True)[self.phase=='train'])
-        # data size is [batch, channel, height, width]
-        stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), prev_hidden), 1)
-        # stacked_inputs = torch.cat((input_, prev_hidden), 1)
-        gates = self.Gates(stacked_inputs)
-
-        # chunk across channel dimension
-        in_gate, remember_gate, out_gate, cell_gate = gates.chunk(4, 1)
-
-        # apply sigmoid non linearity
-        in_gate = F.sigmoid(in_gate)
-        remember_gate = F.sigmoid(remember_gate)
-        out_gate = F.sigmoid(out_gate)
-
-        # apply tanh non linearity
-        cell_gate = F.tanh(cell_gate)
-
-        # compute current cell and hidden state
-        cell = (remember_gate * prev_cell) + (in_gate * cell_gate)
-        hidden = out_gate * F.tanh(cell)
-
-        return cell, hidden
-
-    def init_state(self, input_):
-        batch_size = input_.size()[0]
-        spatial_size = input_.size()[2:]
-        state_size = [batch_size, self.hidden_size] + list(spatial_size)
-        state = (
-            torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-            torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-        )
-        return state
-
-class ConvJANET(nn.Module):
-    """
-    Generate a convolutional JANET cell
-    """
-
-    def __init__(self, input_size, hidden_size, phase='train'):
-        super(ConvJANET, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.Gates = nn.Conv2d(input_size + hidden_size, 2 * hidden_size, 3, padding=1)
-        self.phase = phase
-
-    def forward(self, input_, prev_state):
-
-        # get batch and spatial sizes
-        batch_size = input_.size()[0]
-        spatial_size = input_.size()[2:]
-
-        # generate empty prev_state, if None is provided
-        if prev_state is None:
-            state_size = [batch_size, self.hidden_size] + list(spatial_size)
-            prev_state = (torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
-
-        prev_cell = prev_state[-1]
-        # data size is [batch, channel, height, width]
-        stacked_inputs = torch.cat((F.dropout(input_, p=0.2, training=(False,True)[self.phase=='train']), prev_cell), 1)
-        # stacked_inputs = torch.cat((input_, prev_hidden), 1)
-        gates = self.Gates(stacked_inputs)
-
-        # chunk across channel dimension
-        remember_gate, cell_gate = gates.chunk(2, 1)
-
-        # apply sigmoid non linearity
-        remember_gate = F.sigmoid(remember_gate)
-        # apply tanh non linearity
-        cell_gate = F.tanh(cell_gate)
-
-        # compute current cell and hidden state
-        cell = (remember_gate * prev_cell) + ((1-remember_gate) * cell_gate)
-
-        return (cell, )
-
-    def init_state(self, input_):
-        batch_size = input_.size()[0]
-        spatial_size = input_.size()[2:]
-        state_size = [batch_size, self.hidden_size] + list(spatial_size)
-        state = (torch.zeros(state_size, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
-        return state
-
-class ConvGRUCell(nn.Module):
-    def __init__(self, input_size, hidden_size, kernel_size=3, cuda_flag=True, phase='train'):
-        super(ConvGRUCell, self).__init__()
-        self.input_size = input_size
-        self.cuda_flag = cuda_flag
-        self.hidden_size = hidden_size
-        self.kernel_size = kernel_size
-        self.ConvGates = nn.Conv2d(self.input_size + self.hidden_size, 2 * self.hidden_size, 3,
-                                   padding=self.kernel_size // 2)
-        self.Conv_ct = nn.Conv2d(self.input_size + self.hidden_size, self.hidden_size, 3, padding=self.kernel_size // 2)
-        self.phase = phase
-
-    def forward(self, input, pre_state):
-        if pre_state is None:
-            size_h = [input.size()[0], self.hidden_size] + list(input.size()[2:])
-            pre_state = (torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),)
-
-        hidden = pre_state[-1]
-        c1 = self.ConvGates(torch.cat((F.dropout(input,p=0.2,training=(False,True)[self.phase=='train']), hidden), 1))
-        (rt, ut) = c1.chunk(2, 1)
-        reset_gate = F.sigmoid(rt)
-        update_gate = F.sigmoid(ut)
-        gated_hidden = torch.mul(reset_gate, hidden)
-        p1 = self.Conv_ct(torch.cat((input, gated_hidden), 1))
-        ct = F.tanh(p1)
-        next_h = torch.mul(update_gate, hidden) + (1 - update_gate) * ct
-        return (next_h, )
-
-    def init_state(self, input):
-        size_h = [input.size()[0], self.hidden_size] + list(input.size()[2:])
-        state = torch.zeros(size_h, requires_grad=(True, False)[self.phase == 'test']).cuda(),
-        return state
-
 class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
                  top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False, prior='v2', cuda=True,
-                 tub=0, tub_thresh=1.0, tub_generate_score=0.7):
+                 tub=0, tub_thresh=1.0, tub_generate_score=0.7, device=torch.device('cpu')):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
-        self.device = torch.device('cuda' if cuda and torch.cuda.is_available() else 'cpu')
+        self.device = device
 
         # TODO: implement __call__ in PriorBox
         if prior=='VOC_VGG16_300':
@@ -319,12 +159,12 @@ class TSSD(nn.Module):
         self.size = size
         self.attention_flag = attention
         # SSD network
-        self.vgg = nn.ModuleList(base)
-        self.conv4_3_layer = (23, 33)[len(self.vgg)>40]
+        self.backbone = nn.ModuleList(base)
+        self.conv4_3_layer = (23, 33)[len(self.backbone)>40]
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
-        self.extras_skip = (2, 3)[len(self.vgg)>40]
+        self.extras_skip = (2, 3)[len(self.backbone)>40]
         self.lstm_mode = lstm
 
         self.rnn = nn.ModuleList(head[2])
@@ -356,14 +196,14 @@ class TSSD(nn.Module):
 
                 # apply vgg up to conv4_3 relu
                 for k in range(self.conv4_3_layer):
-                    x = self.vgg[k](x)
+                    x = self.backbone[k](x)
 
                 s = self.L2Norm(x)
                 sources.append(s)
 
                 # apply vgg up to fc7
-                for k in range(23, len(self.vgg)):
-                    x = self.vgg[k](x)
+                for k in range(23, len(self.backbone)):
+                    x = self.backbone[k](x)
                 sources.append(x)
 
                 # apply extra layers and cache source layer outputs
@@ -413,14 +253,14 @@ class TSSD(nn.Module):
 
             # apply vgg up to conv4_3 relu
             for k in range(self.conv4_3_layer):
-                tx = self.vgg[k](tx)
+                tx = self.backbone[k](tx)
 
             s = self.L2Norm(tx)
             sources.append(s)
 
             # apply vgg up to fc7
-            for k in range(23, len(self.vgg)):
-                tx = self.vgg[k](tx)
+            for k in range(23, len(self.backbone)):
+                tx = self.backbone[k](tx)
             sources.append(tx)
 
             # apply extra layers and cache source layer outputs
@@ -486,63 +326,6 @@ class TSSD(nn.Module):
         else:
             print('Sorry only .pth and .pkl files supported.')
 
-# This function is derived from torchvision VGG make_layers()
-# https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
-def vgg(cfg, i, batch_norm=False):
-    layers = []
-    in_channels = i
-    for v in cfg:
-        if v == 'M':
-            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
-        elif v == 'C':
-            layers += [nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=True)]
-        else:
-            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
-            if batch_norm:
-                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-            else:
-                layers += [conv2d, nn.ReLU(inplace=True)]
-            in_channels = v
-    pool5 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
-    conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)
-    # conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
-    conv7 = nn.Conv2d(1024, 512, kernel_size=1)
-    if batch_norm:
-        layers += [pool5, conv6, nn.BatchNorm2d(1024),
-                   nn.ReLU(inplace=True), conv7, nn.BatchNorm2d(512), nn.ReLU(inplace=True)]
-    else:
-        layers += [pool5, conv6,
-               nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
-    return layers
-
-
-def add_extras(cfg, i, batch_norm=False, size=300):
-    # Extra layers added to VGG for feature scaling
-    layers = []
-    in_channels = i
-    flag = False
-    for k, v in enumerate(cfg):
-        if in_channels != 'S':
-            if v == 'S':
-                if batch_norm:
-                    layers += [nn.Conv2d(in_channels, cfg[k + 1],
-                           kernel_size=(1, 3)[flag], stride=2, padding=1), nn.BatchNorm2d(cfg[k + 1])]
-                else:
-                    layers += [nn.Conv2d(in_channels, cfg[k + 1],
-                                         kernel_size=(1, 3)[flag], stride=2, padding=1)]
-            else:
-                if batch_norm and k in [7]:
-                    layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag]), nn.BatchNorm2d(v)]
-
-                else:
-                    layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag])]
-            flag = not flag
-        in_channels = v
-    if size == 512:
-        layers.append(nn.Conv2d(in_channels, 128, kernel_size=1, stride=1))
-        layers.append(nn.Conv2d(128, 256, kernel_size=4, stride=1, padding=1))
-    return layers
-
 def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train', batch_norm=False):
     loc_layers = []
     conf_layers = []
@@ -586,7 +369,7 @@ mbox = {
 
 
 def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_VGG16_300', bn=False,
-              nms_thresh=0.45, attention=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
+              nms_thresh=0.45, attention=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7, device=torch.device('cpu')):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -597,12 +380,12 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
         return SSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                     add_extras(extras[str(size)], 512, batch_norm=bn, size=size),
                                     mbox[prior], num_classes, phase=phase, batch_norm=bn), num_classes,size=size,
-                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
+                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior, device=device)
     else:
         return TSSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
                                 add_extras(extras[str(size)], 512, size=size),
                                 mbox[prior], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
                     nms_thresh=nms_thresh, attention=attention,
-                    tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score
+                    tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score, device=device
                     )

@@ -34,13 +34,13 @@ then
     --momentum 0.9 \
     --visdom 'yes' \
     --send_images_to_visdom 'no' \
-    --save_folder '../weights040/UW/ssd512_UW' \
+    --save_folder '../weights040/UW/ssd300res50_UW' \
     --model_name ssd \
-    --ssd_dim 512 \
+    --ssd_dim 300 \
     --step_list 30000 40000 50000 \
     --save_interval 10000 \
     --batch_size 64 \
-    --gpu_ids '0,1,2,3' \
+    --gpu_ids '2,3' \
     --dataset_name 'UW' \
     --set_file_name 'train' \
     --augm_type 'ssd' \
@@ -51,8 +51,8 @@ then
     --loss_coe 1.0 1.0 0.5 2.0 \
     --freeze 0 \
     --bn 'no' \
-    --backbone 'VGG16' \
-    --basenet 'vgg16_reducedfc_512.pth'
+    --backbone 'ResNet50' \
+    --basenet 'resnet50_reducefc.pth'
 #    --resume '../weights040/UW/ssd512_UW/ssd512_UW_10000.pth' \
 #    --start_iter 10000
 elif [ $type = 'tblstm_vid' ]

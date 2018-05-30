@@ -10,7 +10,7 @@ import torch.backends.cudnn as cudnn
 from data import VOCroot, VIDroot, UWroot
 
 from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name, UW_CLASSES
-from model import build_ssd
+from model import build_ssd, build_ssd_resnet
 
 import sys
 import os
@@ -90,7 +90,7 @@ elif args.dataset_name == 'UW':
     imgsetpath = os.path.join(UWroot, 'ImageSets', '{:s}.txt')
     devkit_path = UWroot[:-1]
     labelmap = UW_CLASSES
-prior = 'VOC_' + args.backbone + '_' + str(args.ssd_dim)
+prior = 'VOC_VGG16_'+ str(args.ssd_dim)
 
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
@@ -98,7 +98,7 @@ pkl_dir = os.path.join(args.save_folder, args.model_dir.split('/')[-1])
 if args.model_dir.split('/')[-1] in ['ssd300_VIDDET', 'ssd300_VIDDET_186', 'ssd300c512_VIDDET','ssd300_VIDDET_512','attssd300_VIDDET_512', 'attssd300_VIDDET_512_atthalf']:
     trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation +'.pth')
 else:
-    if args.tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm']:
+    if args.tssd in ['tblstm', 'gru']:
         trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth')
     else:
         trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + args.dataset_name +'_'+ args.literation +'.pth')
@@ -423,7 +423,7 @@ def test_net(save_folder, net, dataset, transform, top_k,
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     all_time = 0.
-    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name+'_tub'+str(args.tub)+'_'+str(args.tub_thresh)+'_'+str(args.tub_generate_score))
+    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['tblstm', 'gru'] else None
     pre_video_name = None
@@ -498,15 +498,22 @@ if __name__ == '__main__':
                                dataset_name=args.dataset_name, set_file_name=args.set_file_name)
 
     if args.detection:
-        net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
+        if args.backbone[:6] == 'ResNet':
+            net = build_ssd_resnet('test', args.backbone, ssd_dim, num_classes,
+                                   top_k=args.top_k,
+                                   thresh=args.confidence_threshold,
+                                   nms_thresh=args.nms_threshold,
+                                   prior=prior,
+                                   device=device)
+        else:
+            net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
                         prior=prior,
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
-                        tub=args.tub,
-                        tub_thresh=args.tub_thresh,
-                        tub_generate_score=args.tub_generate_score)
+                        bn=args.bn,
+                        device=device)
 
         net.load_state_dict(torch.load(trained_model))
         net.eval()
