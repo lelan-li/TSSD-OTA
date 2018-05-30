@@ -90,7 +90,7 @@ elif args.dataset_name == 'UW':
     imgsetpath = os.path.join(UWroot, 'ImageSets', '{:s}.txt')
     devkit_path = UWroot[:-1]
     labelmap = UW_CLASSES
-prior = 'VOC_VGG16_'+ str(args.ssd_dim)
+prior = 'VOC_'+ str(args.ssd_dim)
 
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim

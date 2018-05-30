@@ -21,13 +21,14 @@ def print_log(args):
     logging.info('model_name: '+ args.model_name)
     logging.info('ssd_dim: '+ str(args.ssd_dim))
     logging.info('Backbone: '+ args.backbone)
+    logging.info('Predection model: '+ str(args.pm))
     if args.resume:
         logging.info('resume: '+ args.resume )
         logging.info('start_iter: '+ str(args.start_iter))
     elif args.resume_from_ssd != 'ssd':
         logging.info('resume_from_ssd: '+ args.resume_from_ssd )
     else:
-        logging.info('load pre-trained vgg: '+ args.basenet )
+        logging.info('load pre-trained backbone: '+ args.basenet )
     logging.info('freeze: '+ str(args.freeze))
     logging.info('lr: '+ str(args.lr))
     logging.info('gamam: '+ str(args.gamma))
@@ -70,6 +71,7 @@ parser.add_argument('--save_folder', default='./weights040/test', help='Location
 parser.add_argument('--dataset_name', default='UW', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--backbone', default='ResNet50', type=str, help='Backbone')
+parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
 parser.add_argument('--model_name', default='ssd', type=str, help='which model selected')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
@@ -109,9 +111,9 @@ os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
 device = torch.device('cuda' if args.cuda and torch.cuda.is_available() else 'cpu')
 
 if args.dataset_name in ['MOT15', 'seqMOT15']:
-    prior = 'MOT_VGG16_' + str(args.ssd_dim)
+    prior = 'MOT_' + str(args.ssd_dim)
 else:
-    prior = 'VOC_VGG16_' + str(args.ssd_dim)
+    prior = 'VOC_' + str(args.ssd_dim)
 
 if args.dataset_name=='VOC0712':
     train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
@@ -173,7 +175,7 @@ if args.visdom:
     viz = visdom.Visdom()
 
 if args.backbone[:6] == 'ResNet':
-    ssd_net = build_ssd_resnet('train', args.backbone, ssd_dim, num_classes, prior=prior, device=device)
+    ssd_net = build_ssd_resnet('train', args.backbone, ssd_dim, num_classes, prior=prior, pm=args.pm, device=device)
 else:
     ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn, device=device)
                    # single_batch=int(args.batch_size/len(args.gpu_ids.split(','))))
@@ -277,6 +279,8 @@ if not args.resume:
             ssd_net.extras.apply(conv_weights_init)
             ssd_net.loc.apply(conv_weights_init)
             ssd_net.conf.apply(conv_weights_init)
+            if args.pm != 0.0:
+                ssd_net.pm.apply(conv_weights_init)
         else:
             ssd_net.extras.apply(weights_init)
             ssd_net.loc.apply(weights_init)
@@ -422,7 +426,6 @@ def train():
         if args.attention:
             loss_att, upsampled_att_map = att_criterion(att,masks)
             loss += args.loss_coe[2]*loss_att
-
         loss.backward()
         if args.tssd != 'ssd':
             nn.utils.clip_grad_norm_(net.module.rnn.parameters(), 5)

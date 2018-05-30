@@ -3,7 +3,6 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import cv2
-import math
 
 # This function is derived from torchvision VGG make_layers()
 # https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
@@ -261,120 +260,121 @@ class Bottleneck(nn.Module):
 
         return out
 #
-# class ResNetSSD(nn.Module):
-#
-#     def __init__(self, block, layers, extra_cfg, mb_cfg, num_classes):
-#         self.inplanes = 64
-#         super(ResNetSSD, self).__init__()
-#         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
-#                                bias=False)
-#         self.bn1 = nn.BatchNorm2d(64)
-#         self.relu =  nn.ReLU(inplace=True)
-#         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-#         self.layer1 = self._make_layer(block, 64, layers[0])
-#         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
-#         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
-#         self.layer4 = self._make_layer(block, 512, layers[3], stride=1)
-#         self.avgpool = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
-#         self.conv5_pre = nn.Conv2d(2048, 1024, kernel_size=1, bias=False)
-#         self.bn5_pre = nn.BatchNorm2d(self.conv5_pre.out_channels)
-#         self.conv5 = nn.Conv2d(1024, 1024, kernel_size=3, padding=1, dilation=1)
-#         self.bn5 = nn.BatchNorm2d(2048)
-#         # extra
-#         extra_layers = []
-#         flag = False
-#         in_channels = self.conv5.out_channels
-#         for k, v in enumerate(extra_cfg):
-#             if in_channels != 'S':
-#                 if v == 'S':
-#                     extra_layers += [nn.Sequential(nn.Conv2d(in_channels, extra_cfg[k + 1],
-#                                              kernel_size=(1, 3)[flag], stride=2, padding=1), nn.BatchNorm2d(extra_cfg[k + 1]), nn.ReLU(inplace=True))]
-#                 elif k < len(extra_cfg)-1:
-#                     extra_layers += [nn.Sequential(nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag]), nn.BatchNorm2d(v), nn.ReLU(inplace=True))]
-#                 else:
-#                     extra_layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag])]
-#                 flag = not flag
-#             in_channels = v
-#         self.extra_layers = nn.ModuleList(extra_layers)
-#         print(extra_layers)
-#
-#         # multi_box
-#         loc_layers = []
-#         conf_layers = []
-#         out_channels = [self.layer2[-1].conv3.out_channels, self.conv5.out_channels,
-#                         self.extra_layers[1][0].out_channels, self.extra_layers[3][0].out_channels,
-#                         self.extra_layers[5][0].out_channels, self.extra_layers[7].out_channels]
-#         for o, v in zip(out_channels, mb_cfg):
-#             loc_layers += [nn.Conv2d(o, v * 4, kernel_size=3, padding=1)]
-#             conf_layers += [nn.Conv2d(o, v * num_classes, kernel_size=3, padding=1)]
-#         self.loc_layers = nn.ModuleList(loc_layers)
-#         self.conf_layers = nn.ModuleList(conf_layers)
-#
-#         # for m in self.modules():
-#         #     if isinstance(m, nn.Conv2d):
-#         #         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-#         #         m.weight.data.normal_(0, math.sqrt(2. / n))
-#         #     elif isinstance(m, nn.BatchNorm2d):
-#         #         m.weight.data.fill_(1)
-#         #         m.bias.data.zero_()
-#
-#     def _make_layer(self, block, planes, blocks, stride=1):
-#         downsample = None
-#         if stride != 1 or self.inplanes != planes * block.expansion:
-#             downsample = nn.Sequential(
-#                 nn.Conv2d(self.inplanes, planes * block.expansion,
-#                           kernel_size=1, stride=stride, bias=False),
-#                 nn.BatchNorm2d(planes * block.expansion),
-#             )
-#
-#         layers = []
-#         layers.append(block(self.inplanes, planes, stride, downsample))
-#         self.inplanes = planes * block.expansion
-#         for i in range(1, blocks):
-#             layers.append(block(self.inplanes, planes))
-#
-#         return nn.Sequential(*layers)
+class ResNetSSD(nn.Module):
+
+    def __init__(self, block, layers, extra_cfg, mb_cfg, num_classes):
+        self.inplanes = 64
+        super(ResNetSSD, self).__init__()
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+                               bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu =  nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = self._make_layer(block, 64, layers[0])
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=1)
+        self.avgpool = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+        self.conv5_pre = nn.Conv2d(2048, 1024, kernel_size=1, bias=False)
+        self.bn5_pre = nn.BatchNorm2d(self.conv5_pre.out_channels)
+        self.conv5 = nn.Conv2d(1024, 1024, kernel_size=3, padding=1, dilation=1)
+        self.bn5 = nn.BatchNorm2d(2048)
+        self.size = 512
+        # extra
+        extra_layers = []
+        flag = False
+        in_channels = self.conv5.out_channels
+        for k, v in enumerate(extra_cfg):
+            if in_channels != 'S':
+                if v == 'S':
+                    extra_layers += [nn.Sequential(nn.Conv2d(in_channels, extra_cfg[k + 1],
+                                             kernel_size=(1, 3)[flag], stride=2, padding=1), nn.BatchNorm2d(extra_cfg[k + 1]), nn.ReLU(inplace=True))]
+                else:
+                    extra_layers += [nn.Sequential(nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag]), nn.BatchNorm2d(v), nn.ReLU(inplace=True))]
+                flag = not flag
+            in_channels = v
+        if self.size == 512:
+            extra_layers.append(nn.Sequential(nn.Conv2d(in_channels, int(extra_cfg[-1]/2), kernel_size=1, stride=1), nn.BatchNorm2d(int(extra_cfg[-1]/2)),
+                                      nn.ReLU(inplace=True)))
+            extra_layers.append(nn.Sequential(nn.Conv2d(int(extra_cfg[-1]/2), extra_cfg[-1], kernel_size=4, stride=1, padding=1), nn.BatchNorm2d(extra_cfg[-1]),
+                                      nn.ReLU(inplace=True)))
+
+        self.extra_layers = nn.ModuleList(extra_layers)
+        print(self.extra_layers)
+
+        # multi_box
+        loc_layers = []
+        conf_layers = []
+        out_channels = [self.layer2[-1].conv3.out_channels, self.conv5.out_channels,
+                        self.extra_layers[1][0].out_channels, self.extra_layers[3][0].out_channels,
+                        self.extra_layers[5][0].out_channels, self.extra_layers[7][0].out_channels]
+        if self.size == 512:
+            out_channels.append(self.extra_layers[9][0].out_channels)
+        for o, v in zip(out_channels, mb_cfg):
+            loc_layers += [nn.Conv2d(o, v * 4, kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(o, v * num_classes, kernel_size=3, padding=1)]
+        self.loc_layers = nn.ModuleList(loc_layers)
+        self.conf_layers = nn.ModuleList(conf_layers)
+
+    def _make_layer(self, block, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or self.inplanes != planes * block.expansion:
+            downsample = nn.Sequential(
+                nn.Conv2d(self.inplanes, planes * block.expansion,
+                          kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(planes * block.expansion),
+            )
+
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample))
+        self.inplanes = planes * block.expansion
+        for i in range(1, blocks):
+            layers.append(block(self.inplanes, planes))
+
+        return nn.Sequential(*layers)
 
 ## prediction module in DSSD
 class PreModule(nn.Module):
 
-    def __init__(self, inchannl):
+    def __init__(self, inchannl, channel_increment_factor):
         super(PreModule, self).__init__()
         self.inchannel = inchannl
         self.pm = nn.Sequential(
             nn.Conv2d(inchannl, inchannl, kernel_size=1),
             nn.Conv2d(inchannl, inchannl, kernel_size=1),
-            nn.Conv2d(inchannl, inchannl*4, kernel_size=1)
+            nn.Conv2d(inchannl, int(inchannl*channel_increment_factor), kernel_size=1)
         )
-        self.extend = nn.Conv2d(inchannl, inchannl*4, kernel_size=1)
+        self.extend = nn.Conv2d(inchannl, int(inchannl*channel_increment_factor), kernel_size=1)
 
     def forward(self, x):
         return self.extend(x) + self.pm(x)
 
-# # resnet101:[3,4,22,3], resnet50:[3,4,6,3], resnet18:[2,2,2,2]
-# img = cv2.resize(cv2.imread('../demo/comp/ILSVRC2015_val_00020001/3.jpg'), (300,300))
-# img_torch = torch.from_numpy(img).unsqueeze(0).permute(0, 3, 1, 2).type(torch.FloatTensor)
-# img_torch -= 128.
-# img_torch /= 255.
-# print(img_torch.size())
-# extra_cfg = [256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512]
-# mb_cfg = [4, 6, 6, 6, 4, 4]
-# model = ResNetSSD(Bottleneck, [2, 2, 2, 2], extra_cfg, mb_cfg, 3)
-# x = model.conv1(img_torch)
-# x = model.bn1(x)
-# x = model.maxpool(x)
-#
-# x = model.layer1(x)
-# x = model.layer2(x)
-# x = model.layer3(x)
-# x = model.layer4(x)
-#
-# x = model.avgpool(x)
-# x = model.conv5_pre(x)
-#
-# x = model.conv5(x)
-#
-# for ex in model.extra_layers:
-#     x = ex(x)
-#
-# pass
+if __name__ == '__main__':
+    # # resnet101:[3,4,22,3], resnet50:[3,4,6,3], resnet18:[2,2,2,2]
+    img = cv2.resize(cv2.imread('../demo/comp/ILSVRC2015_val_00020001/3.jpg'), (512,512))
+    img_torch = torch.from_numpy(img).unsqueeze(0).permute(0, 3, 1, 2).type(torch.FloatTensor).repeat(2,1,1,1)
+    img_torch -= 128.
+    img_torch /= 255.
+    print(img_torch.size())
+    extra_cfg = [256, 'S', 512, 256, 'S', 512, 256, 'S', 512, 256, 'S', 512] #[256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512]
+    mb_cfg = [6, 6, 6, 6, 6, 4, 4] # [4, 6, 6, 6, 4, 4]
+    model = ResNetSSD(Bottleneck, [2, 2, 2, 2], extra_cfg, mb_cfg, 3)
+    x = model.conv1(img_torch)
+    x = model.bn1(x)
+    x = model.maxpool(x)
+
+    x = model.layer1(x)
+    x = model.layer2(x)
+    x = model.layer3(x)
+    x = model.layer4(x)
+
+    x = model.avgpool(x)
+    x = model.conv5_pre(x)
+
+    x = model.conv5(x)
+
+    for i, ex in enumerate(model.extra_layers):
+        print(i)
+        x = ex(x)
+
+    pass

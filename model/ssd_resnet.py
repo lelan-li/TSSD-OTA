@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers import *
-from data import VOC_VGG16_300
+from data import VOC_300, VOC_512
 import os
-from .backbone import ConvAttention, Bottleneck
+from .networks import ConvAttention, Bottleneck, PreModule
 
 class SSD_ResNet(nn.Module):
     """Single Shot Multibox Architecture
@@ -23,13 +23,16 @@ class SSD_ResNet(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, res_layers, extra_cfg, mb_cfg, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, prior='VOC_ResNet_300', device= torch.device('cpu')):
+    def __init__(self, phase, res_layers, extra_cfg, mb_cfg, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, prior='VOC_ResNet_300', pm=0., device= torch.device('cpu')):
         super(SSD_ResNet, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         self.device = device
-        if prior=='VOC_VGG16_300':
-            self.priorbox = PriorBox(VOC_VGG16_300)
+        self.pm_flag= (True, False)[pm == 0.0]
+        if prior=='VOC_300':
+            self.priorbox = PriorBox(VOC_300)
+        elif prior=='VOC_512':
+            self.priorbox = PriorBox(VOC_512)
         else:
             print('Unkown prior type')
 
@@ -61,29 +64,44 @@ class SSD_ResNet(nn.Module):
         for k, v in enumerate(extra_cfg):
             if in_channels != 'S':
                 if v == 'S':
-                    extra_layers += [nn.Sequential(nn.Conv2d(in_channels, extra_cfg[k + 1],
+                    extra_layers.append( nn.Sequential(nn.Conv2d(in_channels, extra_cfg[k + 1],
                                                              kernel_size=(1, 3)[flag], stride=2, padding=1, bias=False),
-                                                   nn.BatchNorm2d(extra_cfg[k + 1]), nn.ReLU(inplace=True))]
-                elif k < len(extra_cfg) - 1:
-                    extra_layers += [
-                        nn.Sequential(nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag], bias=False), nn.BatchNorm2d(v),
-                                      nn.ReLU(inplace=True))]
+                                                   nn.BatchNorm2d(extra_cfg[k + 1]), nn.ReLU(inplace=True)))
                 else:
-                    extra_layers += [nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag], bias=False)]
+                    extra_layers.append(
+                        nn.Sequential(nn.Conv2d(in_channels, v, kernel_size=(1, 3)[flag], bias=False), nn.BatchNorm2d(v),
+                                      nn.ReLU(inplace=True)))
                 flag = not flag
             in_channels = v
+        if self.size == 512:
+            extra_layers.append(nn.Sequential(nn.Conv2d(in_channels, int(extra_cfg[-1]/2), kernel_size=1, stride=1), nn.BatchNorm2d(int(extra_cfg[-1]/2)),
+                                      nn.ReLU(inplace=True)))
+            extra_layers.append(nn.Sequential(nn.Conv2d(int(extra_cfg[-1]/2), extra_cfg[-1], kernel_size=4, stride=1, padding=1), nn.BatchNorm2d(extra_cfg[-1]),
+                                      nn.ReLU(inplace=True)))
         self.extras = nn.ModuleList(extra_layers)
+        # prediction model
+        out_channels = [layer2[-1].conv3.out_channels, conv5.out_channels,
+                        extra_layers[1][0].out_channels, extra_layers[3][0].out_channels,
+                        extra_layers[5][0].out_channels, extra_layers[7][0].out_channels]
+        if self.size == 512:
+            out_channels.append(extra_layers[9][0].out_channels)
+        if self.pm_flag:
+            pm_list = []
+            for i, oc in enumerate(out_channels):
+                pm_list += [PreModule(oc, pm)]
+                out_channels[i] = int(oc*pm)
+            self.pm = nn.ModuleList(pm_list)
         # multi_box
         loc_layers = []
         conf_layers = []
-        out_channels = [layer2[-1].conv3.out_channels, conv5.out_channels,
-                        extra_layers[1][0].out_channels, extra_layers[3][0].out_channels,
-                        extra_layers[5][0].out_channels, extra_layers[7].out_channels]
+
         for o, v in zip(out_channels, mb_cfg):
             loc_layers += [nn.Conv2d(o, v * 4, kernel_size=3, padding=1, bias=False)]
             conf_layers += [nn.Conv2d(o, v * num_classes, kernel_size=3, padding=1, bias=False)]
         self.loc = nn.ModuleList(loc_layers)
         self.conf = nn.ModuleList(conf_layers)
+
+
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
 
@@ -132,10 +150,6 @@ class SSD_ResNet(nn.Module):
         conf = list()
         a_map = list()
 
-        # x = self.maxpool(F.relu(self.bn1(self.conv1(x)), inplace=True))
-        #
-        # x = self.layer1(x)
-        # x = self.layer2(x)
         for i in range(6):
             x = self.backbone[i](x)
         s = self.L2Norm(x)
@@ -148,6 +162,9 @@ class SSD_ResNet(nn.Module):
             x = v(x)
             if k % 2 == 1:
                 sources.append(x)
+        if self.pm_flag:
+            for i, p in  enumerate(self.pm):
+                sources[i] = p(sources[i])
 
         for (f, l, c) in zip(sources, self.loc, self.conf):
             loc.append(l(f).permute(0, 2, 3, 1).contiguous()) # [ith_multi_layer, batch, height, width, out_channel]
@@ -179,19 +196,21 @@ class SSD_ResNet(nn.Module):
 
 
 mbox = {
-    'VOC_VGG16_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    'VOC_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    'VOC_512': [6, 6, 6, 6, 6, 4, 4],
 }
 extras = {
     'ResNet300': [256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512],
+    'ResNet512': [256, 'S', 512, 256, 'S', 512, 256, 'S', 512, 256, 'S', 512],
 }
 
-def build_ssd_resnet(phase, backbone='ResNet18', size=300, num_classes=21, top_k=200, thresh=0.01, prior='VOC_VGG16_300',
-              nms_thresh=0.45, device=torch.device('cpu')):
+def build_ssd_resnet(phase, backbone='ResNet18', size=300, num_classes=21, top_k=200, thresh=0.01, prior='VOC_300',
+              nms_thresh=0.45, pm=0., device=torch.device('cpu')):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
-    if size not in [300]:
-        print("Error: Sorry only SSD300 is supported currently!")
+    if size not in [300, 512]:
+        print("Error: Sorry only SSD300/512 is supported currently!")
         return
     if backbone == 'ResNet18':
         res_layers = [2,2,2,2]
@@ -206,5 +225,5 @@ def build_ssd_resnet(phase, backbone='ResNet18', size=300, num_classes=21, top_k
         return
 
     return SSD_ResNet(phase,res_layers, extras['ResNet'+str(size)], mbox[prior], num_classes,size=size,
-                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, prior=prior, device=device)
+                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, prior=prior, pm=pm, device=device)
 

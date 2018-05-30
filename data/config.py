@@ -26,7 +26,7 @@ WORKERS = 4
 
 #SSD300 CONFIGS
 # newer version: use additional conv11_2 layer as last layer before multibox layers
-VOC_VGG16_300 = {
+VOC_300 = {
     'feature_maps' : [38, 19, 10, 5, 3, 1],
 
     'min_dim' : 300,
@@ -51,7 +51,7 @@ VOC_VGG16_300 = {
     'name' : 'VOC_VGG16_300',
 }
 
-VOC_VGG16_512= {
+VOC_512= {
     'feature_maps' : [64, 32, 16, 8, 4, 2, 1],
 
     'min_dim' : 512,
@@ -73,7 +73,7 @@ VOC_VGG16_512= {
     'name' : 'VOC_VGG16_512'
 }
 
-MOT_VGG16_300 = {
+MOT_300 = {
     'feature_maps' : [38, 19, 10, 5, 3, 1],
 
     'min_dim' : 300,

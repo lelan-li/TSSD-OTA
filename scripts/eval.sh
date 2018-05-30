@@ -8,7 +8,7 @@ then
     --model_dir '../weights040/UW/ssd300res50_UW' \
     --model_name ssd \
     --ssd_dim 300 \
-    --literation 10000 \
+    --literation 0 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
@@ -17,7 +17,7 @@ then
     --set_file_name 'test' \
     --dataset_name 'UW' \
     --tssd $type \
-    --gpu_id '0' \
+    --gpu_id '1' \
     --detection 'yes' \
     --attention 'no'
 elif [ $type = 'tblstm_vid' ]

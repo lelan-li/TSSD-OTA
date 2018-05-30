@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers import *
-from data import VOC_VGG16_300, MOT_VGG16_300, VOC_VGG16_512
+from data import VOC_300, MOT_300, VOC_512
 import os
-from .backbone import vgg, add_extras, ConvAttention, ConvLSTMCell, ConvGRUCell
+from .networks import vgg, add_extras, ConvAttention, ConvLSTMCell, ConvGRUCell
 
 class SSD(nn.Module):
     """Single Shot Multibox Architecture
@@ -30,12 +30,12 @@ class SSD(nn.Module):
         self.attention_flag = attention
         self.device = device
         # TODO: implement __call__ in PriorBox
-        if prior=='VOC_VGG16_300':
-            self.priorbox = PriorBox(VOC_VGG16_300)
-        elif prior=='MOT_VGG16_300':
-            self.priorbox = PriorBox(MOT_VGG16_300)
-        elif prior=='VOC_VGG16_512':
-            self.priorbox = PriorBox(VOC_VGG16_512)
+        if prior=='VOC_300':
+            self.priorbox = PriorBox(VOC_300)
+        elif prior=='MOT_300':
+            self.priorbox = PriorBox(MOT_300)
+        elif prior=='VOC_512':
+            self.priorbox = PriorBox(VOC_512)
 
         with torch.no_grad():
             self.priors = self.priorbox.forward().to(self.device)
@@ -147,12 +147,12 @@ class TSSD(nn.Module):
         self.device = device
 
         # TODO: implement __call__ in PriorBox
-        if prior=='VOC_VGG16_300':
-            self.priorbox = PriorBox(VOC_VGG16_300)
-        elif prior=='MOT_VGG16_300':
-            self.priorbox = PriorBox(MOT_VGG16_300)
-        elif prior=='VOC_VGG16_512':
-            self.priorbox = PriorBox(VOC_VGG16_512)
+        if prior=='VOC_300':
+            self.priorbox = PriorBox(VOC_300)
+        elif prior=='MOT_300':
+            self.priorbox = PriorBox(MOT_300)
+        elif prior=='VOC_512':
+            self.priorbox = PriorBox(VOC_512)
 
         with torch.no_grad():
             self.priors = self.priorbox.forward().to(self.device)
@@ -362,13 +362,13 @@ extras = {
     '512': [256, 'S', 512, 128, 'S', 256, 128, 'S', 256, 128, 'S', 256],
 }
 mbox = {
-    'VOC_VGG16_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-    'MOT_VGG16_300': [5, 5, 5, 5, 5, 5],
-    'VOC_VGG16_512': [6, 6, 6, 6, 6, 4, 4],
+    'VOC_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    'MOT_300': [5, 5, 5, 5, 5, 5],
+    'VOC_512': [6, 6, 6, 6, 6, 4, 4],
 }
 
 
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_VGG16_300', bn=False,
+def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_300', bn=False,
               nms_thresh=0.45, attention=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7, device=torch.device('cpu')):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
