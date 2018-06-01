@@ -3,13 +3,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
-import torch.nn.init as init
 import argparse
 import torch.utils.data as data
-from data import AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, VOCroot, VIDroot, MOT17Detroot, MOT15root, UWroot, VOC_CLASSES, VID_CLASSES, UW_CLASSES
-from utils.augmentations import SSDAugmentation, seqSSDAugmentation
-from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss
-from model import build_ssd, build_ssd_resnet
+from data import AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, mb_cfg, dataset_training_cfg
+
+from utils.augmentations import SSDAugmentation
+from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss, RefineMultiBoxLoss
+from layers.functions import PriorBox
 import numpy as np
 import time
 import logging
@@ -21,6 +21,8 @@ def print_log(args):
     logging.info('model_name: '+ args.model_name)
     logging.info('ssd_dim: '+ str(args.ssd_dim))
     logging.info('Backbone: '+ args.backbone)
+    if args.backbone == 'RefineDet_VGG':
+        logging.info('Refine: ' + str(args.refine))
     logging.info('Predection model: '+ str(args.pm))
     if args.resume:
         logging.info('resume: '+ args.resume )
@@ -51,9 +53,9 @@ def print_log(args):
     logging.info('loss weights: '+ str(args.loss_coe))
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Training')
-parser.add_argument('--basenet', default='resnet50_reducefc.pth', help='pretrained base model')
+parser.add_argument('--basenet', default='vgg16_reducedfc.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
-parser.add_argument('--batch_size', default=1, type=int, help='Batch size for training')
+parser.add_argument('--batch_size', default=4, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint') #'./weights/tssd300_VID2017_b8s8_RSkipTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
 parser.add_argument('--resume_from_ssd', default='ssd', type=str, help='Resume vgg and extras from ssd checkpoint')
 parser.add_argument('--freeze', default=0, type=int, help='Freeze, 1. vgg, extras; 2. vgg, extras, conf, loc; 3. vgg, extras, rnn, attention, conf, loc')
@@ -70,11 +72,13 @@ parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, hel
 parser.add_argument('--save_folder', default='./weights040/test', help='Location to save checkpoint models')
 parser.add_argument('--dataset_name', default='UW', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
-parser.add_argument('--backbone', default='ResNet50', type=str, help='Backbone')
+parser.add_argument('--backbone', default='RefineDet_VGG', type=str, help='Backbone')
 parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
+parser.add_argument('--refine', default=True, type=str2bool, help='Only work when backbone==RefineDet')
+parser.add_argument('--drop', default=False, type=str2bool, help='DropOut, Only work when backbone==RefineDet')
 parser.add_argument('--model_name', default='ssd', type=str, help='which model selected')
-parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
-parser.add_argument('--gpu_ids', default='0,1', type=str, help='gpu number')
+parser.add_argument('--ssd_dim', default=320, type=int, help='ssd_dim 300, 320 or 512')
+parser.add_argument('--gpu_ids', default='1,0', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--seq_len', default=8, type=int, help='sequence length for training')
@@ -111,50 +115,13 @@ os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
 device = torch.device('cuda' if args.cuda and torch.cuda.is_available() else 'cpu')
 
 if args.dataset_name in ['MOT15', 'seqMOT15']:
-    prior = 'MOT_' + str(args.ssd_dim)
+    prior = 'MOT_300'
+    cfg = mb_cfg[prior]
 else:
-    prior = 'VOC_' + str(args.ssd_dim)
+    prior = 'VOC_'+ str(args.ssd_dim)
+    cfg = mb_cfg[prior]
 
-if args.dataset_name=='VOC0712':
-    train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
-    num_classes = len(VOC_CLASSES) + 1
-    data_root = VOCroot
-elif args.dataset_name=='VIDDET':
-    train_sets = 'train'
-    num_classes = len(VID_CLASSES) + 1
-    data_root = VIDroot
-elif args.dataset_name=='VID2017':
-    train_sets = 'train'
-    num_classes = len(VID_CLASSES) + 1
-    data_root = VIDroot
-elif args.dataset_name=='MOT17Det':
-    train_sets = 'train'
-    num_classes = 2
-    data_root = MOT17Detroot
-elif args.dataset_name=='seqMOT17Det':
-    train_sets = 'train_video'
-    num_classes = 2
-    data_root = MOT17Detroot
-elif args.dataset_name=='MOT15':
-    train_sets = 'train15_17'
-    num_classes = 2
-    data_root = MOT15root
-elif args.dataset_name == 'seqMOT15':
-    train_sets = 'train_video'
-    num_classes = 2
-    data_root = MOT15root
-elif args.dataset_name=='UW':
-    train_sets = 'train'
-    num_classes = len(UW_CLASSES) + 1
-    data_root = UWroot
-elif args.dataset_name == 'seqUW':
-    train_sets = 'train'
-    num_classes = len(UW_CLASSES) + 1
-    data_root = UWroot
-else:
-    train_sets = 'train_remove_noobject'
-    num_classes = len(VID_CLASSES) + 1
-    data_root = VIDroot
+train_sets, num_classes, data_root = dataset_training_cfg[args.dataset_name]
 
 set_filename = args.set_file_name
 collate_fn = seq_detection_collate if args.dataset_name[:3]=='seq' else detection_collate
@@ -174,10 +141,18 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-if args.backbone[:6] == 'ResNet':
-    ssd_net = build_ssd_resnet('train', args.backbone, ssd_dim, num_classes, prior=prior, pm=args.pm, device=device)
+if args.backbone == 'RFB_VGG':
+    from model.rfbnet_vgg import build_net
+    ssd_net = build_net('train', ssd_dim, num_classes)
+elif args.backbone == 'RefineDet_VGG':
+    from model.refinedet_vgg import build_net
+    ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine, dropout=args.drop)
+elif args.backbone[:6] == 'ResNet':
+    from model.ssd_resnet import build_net
+    ssd_net = build_net('train', backbone=args.backbone, size=ssd_dim, num_classes=num_classes, prior=prior, pm=args.pm)
 else:
-    ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn, device=device)
+    from model.ssd import build_net
+    ssd_net = build_net('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn)
                    # single_batch=int(args.batch_size/len(args.gpu_ids.split(','))))
 net = ssd_net
 
@@ -238,64 +213,12 @@ if args.freeze:
         for param in freeze_net.parameters():
             param.requires_grad = False
 
-def xavier(param):
-    init.xavier_uniform_(param)
-
-def orthogonal(param):
-    init.orthogonal_(param)
-
-def weights_init(m):
-    if isinstance(m, nn.Conv2d):
-        xavier(m.weight.data)
-        m.bias.data.zero_()
-    elif isinstance(m, nn.BatchNorm2d):
-        m.weight.data.fill_(1)
-        m.bias.data.zero_()
-
-def conv_weights_init(m):
-    if isinstance(m, nn.Conv2d):
-        xavier(m.weight)
-    elif isinstance(m, nn.BatchNorm2d):
-        m.weight.data.fill_(1)
-        m.bias.data.zero_()
-
-def orthogonal_weights_init(m):
-    if isinstance(m, nn.Conv2d):
-        orthogonal(m.weight.data)
-        m.bias.data.fill_(1)
-
 if not args.resume:
-    if args.resume_from_ssd != 'ssd':
-        if args.attention:
-            print('Initializing Attention weights...')
-            ssd_net.attention.apply(conv_weights_init)
-        if args.tssd in ['gru', 'tblstm']:
-            print('Initializing RNN weights...')
-            ssd_net.rnn.apply(orthogonal_weights_init)
-    else:
-        print('Initializing extra, loc, conf weights...')
-        # initialize newly added layers' weights with xavier method
-        if args.backbone[:6] == 'ResNet':
-            ssd_net.extras.apply(conv_weights_init)
-            ssd_net.loc.apply(conv_weights_init)
-            ssd_net.conf.apply(conv_weights_init)
-            if args.pm != 0.0:
-                ssd_net.pm.apply(conv_weights_init)
-        else:
-            ssd_net.extras.apply(weights_init)
-            ssd_net.loc.apply(weights_init)
-            ssd_net.conf.apply(weights_init)
-        if args.tssd in ['gru', 'tblstm']:
-            print('Initializing RNN weights...')
-            ssd_net.rnn.apply(orthogonal_weights_init)
-        if args.attention:
-            print('Initializing Attention weights...')
-            ssd_net.attention.apply(conv_weights_init)
+    from model.networks import net_init
+    net_init(ssd_net, args.backbone, resume_from_ssd=args.resume_from_ssd, tssd=args.tssd, attention=args.attention, pm=args.pm, refine=args.refine)
 
 if args.augm_type == 'ssd':
     data_transform = SSDAugmentation
-elif args.augm_type == 'seqssd':
-    data_transform = seqSSDAugmentation
 else:
     data_transform = BaseTransform
 
@@ -348,9 +271,18 @@ else:
                                {'params': net.module.loc.parameters()},
                                {'params': net.module.conf.parameters()}],
                                lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device)
+    if args.backbone in ['RefineDet_VGG'] and args.refine:
+        arm_criterion = RefineMultiBoxLoss(2, 0.5, True, 0, True, 3, 0.5, False, device=device)
+        criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, object_score = 0.01, device=device)
+    else:
+        criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device)
+
 if args.attention:
     att_criterion = AttentionLoss(args.ssd_dim)
+
+priorbox = PriorBox(cfg)
+with torch.no_grad():
+    priors = priorbox.forward().to(device)
 
 def train():
     net.train()
@@ -374,6 +306,9 @@ def train():
         # initialize visdom loss plot
         y_dim = 3
         legend = ['Loss', 'Loc Loss', 'Conf Loss',]
+        if args.backbone in ['RefineDet_VGG'] and args.refine:
+            y_dim += 2
+            legend += ['Arm Loc Loss', 'Arm conf Loss']
         if args.attention:
             y_dim += 1
             legend += ['Att Loss',]
@@ -413,19 +348,30 @@ def train():
         # forward
         t0 = time.time()
         loss = torch.tensor(0., requires_grad=True).to(device)
-        out, att = net(images)
+        if args.attention:
+            out, att = net(images)
+        # elif args.backbone in ['RefineDet_VGG'] and args.refine:
+        #     out_arm, out = net(images)
+        else:
+            out = net(images)
+        # backward
+        optimizer.zero_grad()
         if args.tssd != 'ssd':
             optimizer_rnn.zero_grad()
-            loss_l, loss_c, loss_asso = criterion(out, targets)
+            loss_l, loss_c, loss_asso = criterion(out, priors, targets)
+        elif args.backbone in ['RefineDet_VGG'] and args.refine:
+            loss_arm_l, loss_arm_c = arm_criterion(out[:2], priors, targets)
+            loss_l, loss_c = criterion(out[2:], priors, targets, arm_data=out[:2], filter_object=True)
+            loss += args.loss_coe[0] * (loss_arm_l+loss_l) + args.loss_coe[1] * (loss_arm_c+loss_c)
         else:
-            loss_l, loss_c = criterion(out, targets)
-        optimizer.zero_grad()
-        loss += args.loss_coe[0] * loss_l + args.loss_coe[1] * loss_c
-        if args.association:
+            loss_l, loss_c = criterion(out, priors, targets)
+            loss += args.loss_coe[0] * loss_l + args.loss_coe[1] * loss_c
+        if args.tssd != 'ssd' and args.association:
             loss += args.loss_coe[3]*loss_asso
         if args.attention:
             loss_att, upsampled_att_map = att_criterion(att,masks)
             loss += args.loss_coe[2]*loss_att
+
         loss.backward()
         if args.tssd != 'ssd':
             nn.utils.clip_grad_norm_(net.module.rnn.parameters(), 5)
@@ -474,6 +420,8 @@ def train():
                         legend=legend,
                     )
                 )
+            if args.backbone in ['RefineDet_VGG'] and args.refine:
+                y_dis += [args.loss_coe[0]*loss_arm_l.cpu(), args.loss_coe[1]*loss_arm_c.cpu()]
             if args.attention:
                 y_dis += [args.loss_coe[2]*loss_att.cpu(),]
             if args.association:

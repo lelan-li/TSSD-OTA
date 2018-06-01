@@ -1,24 +1,47 @@
 conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
-type='ssd'
-if [ $type = 'ssd' ]
+type='ssd_refine'
+if [ $type = 'ssd_refine' ]
 then
     python ../eval.py \
-    --model_dir '../weights040/UW/ssd300res50_UW' \
+    --model_dir '../weights040/UW/ssd320RefineFalse_UW' \
     --model_name ssd \
-    --ssd_dim 300 \
-    --literation 0 \
+    --ssd_dim 320 \
+    --literation 30000 \
+    --save_folder ../eval \
+    --confidence_threshold $conf_thresh \
+    --nms_threshold $nms_thresh \
+    --top_k $top_k \
+    --backbone 'RefineDet_VGG' \
+    --refine 'no' \
+    --pm 0.0 \
+    --set_file_name 'val' \
+    --dataset_name 'UW' \
+    --tssd 'ssd' \
+    --gpu_id '1' \
+    --detection 'yes' \
+    --attention 'no'
+elif [ $type = 'ssd_resnet' ]
+then
+    python ../eval.py \
+    --model_dir '../weights040/UW/ssd512res50_UW' \
+    --model_name ssd \
+    --ssd_dim 512 \
+    --literation 60000 \
     --save_folder ../eval \
     --confidence_threshold $conf_thresh \
     --nms_threshold $nms_thresh \
     --top_k $top_k \
     --backbone 'ResNet50' \
+    --refine 'no' \
+    --pm 0.0 \
     --set_file_name 'test' \
     --dataset_name 'UW' \
-    --tssd $type \
-    --gpu_id '1' \
+    --tssd 'ssd' \
+    --gpu_id '0' \
     --detection 'yes' \
+    --cuda 'yes' \
     --attention 'no'
 elif [ $type = 'tblstm_vid' ]
 then

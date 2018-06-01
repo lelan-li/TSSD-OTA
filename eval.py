@@ -9,9 +9,8 @@ import torch
 import torch.backends.cudnn as cudnn
 from data import VOCroot, VIDroot, UWroot
 
-from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name, UW_CLASSES
-from model import build_ssd, build_ssd_resnet
-
+from data import AnnotationTransform, VOCDetection, BaseTransform, VOC_CLASSES, VID_CLASSES, VID_CLASSES_name, UW_CLASSES, mb_cfg
+from layers.functions import Detect,PriorBox
 import sys
 import os
 import time
@@ -43,11 +42,13 @@ parser.add_argument('--cuda', default=True, type=str2bool,
 parser.add_argument('--dataset_name', default='VID2017', help='Which dataset')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--backbone', default='VGG16', type=str, help='Backbone')
+parser.add_argument('--refine', default=False, type=str2bool, help='refine symbol for RefineDet')
+parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
 parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
 parser.add_argument('--literation', default='20000', type=str,help='File path to save results')
 parser.add_argument('--model_dir', default='../weights/tssd300_VID2017_b4_s16_SkipShare_preVggExtraLocConf', type=str,help='Path to save model')
 parser.add_argument('--detection', default='no', type=str2bool, help='detection or not')
-parser.add_argument('--tssd',  default='lstm', type=str, help='ssd or tssd')
+parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
 parser.add_argument('--gpu_id', default='2,3', type=str,help='gpu id')
 parser.add_argument('--attention', default=False, type=str2bool, help='attention')
 parser.add_argument('--tub', default=0, type=int, help='tubelet max size')
@@ -55,17 +56,14 @@ parser.add_argument('--tub_thresh', default=0.95, type=float, help='> : generate
 parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : generate tubelet')
 
 args = parser.parse_args()
-
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 device = torch.device('cuda' if args.cuda and torch.cuda.is_available() else 'cpu')
-if args.cuda and torch.cuda.is_available():
-    cudnn.benchmark = True
-
 if not os.path.exists(args.save_folder):
     os.mkdir(args.save_folder)
 
 if args.cuda and torch.cuda.is_available():
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
+    cudnn.benchmark = True
 else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
@@ -90,7 +88,9 @@ elif args.dataset_name == 'UW':
     imgsetpath = os.path.join(UWroot, 'ImageSets', '{:s}.txt')
     devkit_path = UWroot[:-1]
     labelmap = UW_CLASSES
+
 prior = 'VOC_'+ str(args.ssd_dim)
+cfg = mb_cfg[prior]
 
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
@@ -188,9 +188,11 @@ def write_voc_results_file(all_boxes, dataset):
                                    dets[k, 2] + 1, dets[k, 3] + 1))
 
 
-def do_python_eval(output_dir='output', use_07=True):
+def do_python_eval(output_dir='output', use_07=True, FPS=None):
     cachedir = os.path.join(devkit_path, 'annotations_cache')
     aps = []
+    recs = []
+    precs = []
     # The PASCAL VOC metric changed in 2010
     use_07_metric = use_07
     print('VOC07 metric? ' + ('Yes' if use_07_metric else 'No'))
@@ -202,8 +204,9 @@ def do_python_eval(output_dir='output', use_07=True):
            filename, annopath, imgsetpath.format(args.set_file_name), cls, cachedir,
            ovthresh=0.5, use_07_metric=use_07_metric)
         aps += [ap]
-        rec = [rec] if isinstance(rec, float) else rec
-        prec = [prec] if isinstance(prec, float) else prec
+        recs += [rec] #if isinstance(rec, float) else rec
+        precs += [prec] #if isinstance(prec, float) else prec
+        # print(recs)
         # rec_top = rec[args.top_k-1] if len(rec) > args.top_k else rec[-1]
         # prec_top = prec[args.top_k - 1] if len(prec) > args.top_k else prec[-1]
         if args.dataset_name in ['VID2017']:
@@ -213,18 +216,33 @@ def do_python_eval(output_dir='output', use_07=True):
         with open(os.path.join(output_dir, cls + '_pr.pkl'), 'wb') as f:
             pickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
     print('Mean AP = {:.4f}'.format(np.mean(aps)))
-    # print('~~~~~~~~')
-    # print('Results:')
-    # for ap in aps:
-    #     print('{:.3f}'.format(ap))
-    # print('{:.3f}'.format(np.mean(aps)))
-    # print('~~~~~~~~')
-    # print('')
-    # print('--------------------------------------------------------------')
-    # print('Results computed with the **unofficial** Python eval code.')
-    # print('Results should be very close to the official MATLAB eval code.')
-    # print('--------------------------------------------------------------')
-
+    with open(os.path.join(output_dir, str(np.mean(aps))[2:6])+'.txt', 'w') as res_file:
+        res_file.write('CUDA: '+ str(args.cuda)+ '\n')
+        res_file.write('model_dir: '+ args.model_dir+ '\n')
+        res_file.write('literation: '+ args.literation+ '\n')
+        res_file.write('model_name: '+ args.model_name+ '\n')
+        res_file.write('backbone : '+ args.backbone + '\n')
+        if args.backbone in ['RefineDet_VGG']:
+            res_file.write('refine : ' + str(args.refine) + '\n')
+        res_file.write('pm: '+ str(args.pm)+ '\n')
+        res_file.write('ssd_dim: '+ str(args.ssd_dim)+ '\n')
+        res_file.write('tssd: '+ str(args.tssd)+ '\n')
+        res_file.write('attention: '+ str(args.attention)+ '\n')
+        res_file.write('confidence_threshold: '+ str(args.confidence_threshold)+ '\n')
+        res_file.write('nms_threshold: '+ str(args.nms_threshold)+ '\n')
+        res_file.write('top_k: '+ str(args.top_k)+ '\n')
+        res_file.write('dataset_name: '+ str(args.dataset_name)+ '\n')
+        res_file.write('set_file_name: '+ str(args.set_file_name)+ '\n')
+        res_file.write('detection: '+ str(args.detection)+ '\n')
+        res_file.write('~~~~~~~~~~~~~~~~~\n')
+        for i, cls in enumerate(labelmap):
+            if args.dataset_name in ['VID2017']:
+                res_file.write('{} AP = {:.4f}, Rec = {:.4f}, Prec = {:.4f}\n'.format(VID_CLASSES_name[VID_CLASSES.index(cls)], aps[i], recs[i][-1], np.max(precs[i])))
+            else:
+                res_file.write('{} AP = {:.4f}, Rec = {:.4f}, Prec = {:.4f}\n'.format(cls, aps[i], recs[i][-1], np.max(precs[i])))
+        res_file.write('Mean AP = {:.4f}\n'.format(np.mean(aps)))
+        if FPS:
+            res_file.write('FPS = {:.4f}\n'.format(FPS))
 
 def voc_ap(rec, prec, use_07_metric=True):
     """ ap = voc_ap(rec, prec, [use_07_metric])
@@ -292,7 +310,7 @@ cachedir: Directory for caching the annotations
 # first load gt
     if not os.path.isdir(cachedir):
         os.mkdir(cachedir)
-    cachefile = os.path.join(cachedir, 'annots.pkl')
+    cachefile = os.path.join(cachedir, 'annots_'+args.set_file_name+'.pkl')
     # read list of images
     with open(imagesetfile, 'r') as f:
         if args.dataset_name == 'VID2017':
@@ -410,7 +428,7 @@ cachedir: Directory for caching the annotations
 
     return rec, prec, ap
 
-def test_net(save_folder, net, dataset, transform, top_k,
+def test_net(save_folder, net, dataset, transform, top_k, detector, priors,
              im_size=300, thresh=0.05, tssd='ssd'):
     """Test a Fast R-CNN network on an image database."""
     num_images = len(dataset)
@@ -441,7 +459,8 @@ def test_net(save_folder, net, dataset, transform, top_k,
             x = im.unsqueeze(0).to(device)
             if tssd == 'ssd':
                 _t['im_detect'].tic()
-                detections,_ = net(x)
+                loc, conf = net(x)
+                detections = detector.forward(loc, conf, priors)
                 detect_time = _t['im_detect'].toc(average=False)
             else:
                 _t['im_detect'].tic()
@@ -469,17 +488,17 @@ def test_net(save_folder, net, dataset, transform, top_k,
         # if i % (int(num_images / 1000)) == 0:
         print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
-    print('all time:', all_time)
+    FPS = (num_images-10)/all_time
+    print('FPS:', FPS)
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
     print('Evaluating detections')
-    evaluate_detections(all_boxes, output_dir, dataset)
+    evaluate_detections(all_boxes, output_dir, dataset, FPS=FPS)
 
-
-def evaluate_detections(box_list, output_dir, dataset):
+def evaluate_detections(box_list, output_dir, dataset, FPS=None):
     write_voc_results_file(box_list, dataset)
-    do_python_eval(output_dir)
+    do_python_eval(output_dir, FPS=FPS)
 
 
 if __name__ == '__main__':
@@ -498,31 +517,38 @@ if __name__ == '__main__':
                                dataset_name=args.dataset_name, set_file_name=args.set_file_name)
 
     if args.detection:
-        if args.backbone[:6] == 'ResNet':
-            net = build_ssd_resnet('test', args.backbone, ssd_dim, num_classes,
-                                   top_k=args.top_k,
-                                   thresh=args.confidence_threshold,
-                                   nms_thresh=args.nms_threshold,
-                                   prior=prior,
-                                   device=device)
+        if args.backbone in ['RFB_VGG']:
+            from model.rfbnet_vgg import build_net
+            net = build_net('test', ssd_dim, num_classes)
+        elif args.backbone in ['RefineDet_VGG']:
+            from model.refinedet_vgg import build_net
+            net = build_net('test', size=ssd_dim, num_classes=num_classes, use_refine=args.refine)
+        elif args.backbone[:6] == 'ResNet':
+            from model.ssd_resnet import build_net
+            net = build_net('test', backbone=args.backbone, prior=prior,size=ssd_dim, num_classes=num_classes, pm=args.pm)
         else:
-            net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
+            from model.ssd import build_net
+            net = build_net('test', ssd_dim, num_classes, tssd=args.tssd,
                         prior=prior,
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
                         bn=args.bn,
-                        device=device)
-
+                        )
+        print('loading model!', args.model_dir, args.literation)
         net.load_state_dict(torch.load(trained_model))
         net.eval()
         print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
+        detector = Detect(num_classes, 0, args.top_k, args.confidence_threshold, args.nms_threshold, tub=0, tub_thresh=1.0, tub_generate_score=0.7 )
+        priorbox = PriorBox(cfg)
+        with torch.no_grad():
+            priors = priorbox.forward().to(device)
         # load data
         net = net.to(device)
         # evaluation
         test_net(args.save_folder, net, dataset,
-                 BaseTransform(net.size, dataset_mean), args.top_k, ssd_dim,
+                 BaseTransform(net.size, dataset_mean), args.top_k, detector, priors, im_size=ssd_dim,
                  thresh=args.confidence_threshold, tssd=args.tssd)
     else:
         out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)

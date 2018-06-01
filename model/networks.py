@@ -1,12 +1,96 @@
 import torch
-import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.init as init
 import cv2
 
+vgg_base = {
+    '300': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
+            512, 512, 512], # output channel
+    '320': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
+            512, 512, 512],
+    '512': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
+            512, 512, 512],
+}
+
+extras = {
+    '300': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
+    '512': [256, 'S', 512, 128, 'S', 256, 128, 'S', 256, 128, 'S', 256],
+}
+mbox = {
+    'VOC_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
+    'MOT_300': [5, 5, 5, 5, 5, 5],
+    'VOC_512': [6, 6, 6, 6, 6, 4, 4],
+}
+
+def xavier(param):
+    init.xavier_uniform_(param)
+
+def orthogonal(param):
+    init.orthogonal_(param)
+
+def weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        xavier(m.weight.data)
+        m.bias.data.zero_()
+    elif isinstance(m, nn.BatchNorm2d):
+        m.weight.data.fill_(1)
+        m.bias.data.zero_()
+
+def conv_weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        xavier(m.weight)
+    elif isinstance(m, nn.BatchNorm2d):
+        m.weight.data.fill_(1)
+        m.bias.data.zero_()
+
+def orthogonal_weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        orthogonal(m.weight.data)
+        m.bias.data.fill_(1)
+
+def net_init(ssd_net, backbone,resume_from_ssd='ssd', tssd='ssd', attention=False, pm=0.0, refine=False):
+    if resume_from_ssd != 'ssd':
+        if attention:
+            print('Initializing Attention weights...')
+            ssd_net.attention.apply(conv_weights_init)
+        if tssd in ['gru', 'tblstm']:
+            print('Initializing RNN weights...')
+            ssd_net.rnn.apply(orthogonal_weights_init)
+    else:
+        print('Initializing extra, loc, conf weights...')
+        # initialize newly added layers' weights with xavier method
+        if backbone in ['RFB_VGG'] or backbone[:6] == 'ResNet':
+            ssd_net.extras.apply(conv_weights_init)
+            ssd_net.loc.apply(conv_weights_init)
+            ssd_net.conf.apply(conv_weights_init)
+            if pm != 0.0:
+                ssd_net.pm.apply(conv_weights_init)
+        elif backbone in ['RefineDet_VGG']:
+            ssd_net.extras.apply(weights_init)
+            ssd_net.trans_layers.apply(weights_init)
+            ssd_net.latent_layrs.apply(weights_init)
+            ssd_net.up_layers.apply(weights_init)
+            ssd_net.odm_loc.apply(weights_init)
+            ssd_net.odm_conf.apply(weights_init)
+            if refine:
+                ssd_net.arm_loc.apply(weights_init)
+                ssd_net.arm_conf.apply(weights_init)
+            if pm != 0.0:
+                ssd_net.pm.apply(conv_weights_init)
+        else:
+            ssd_net.extras.apply(weights_init)
+            ssd_net.loc.apply(weights_init)
+            ssd_net.conf.apply(weights_init)
+        if tssd in ['gru', 'tblstm']:
+            print('Initializing RNN weights...')
+            ssd_net.rnn.apply(orthogonal_weights_init)
+        if attention:
+            print('Initializing Attention weights...')
+            ssd_net.attention.apply(conv_weights_init)
 # This function is derived from torchvision VGG make_layers()
 # https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
-def vgg(cfg, i, batch_norm=False):
+def vgg(cfg, i, batch_norm=False, pool5_ds=False):
     layers = []
     in_channels = i
     for v in cfg:
@@ -21,13 +105,16 @@ def vgg(cfg, i, batch_norm=False):
             else:
                 layers += [conv2d, nn.ReLU(inplace=True)]
             in_channels = v
-    pool5 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+    if pool5_ds:
+        pool5 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+    else:
+        pool5 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
     conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=6, dilation=6)
-    # conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
-    conv7 = nn.Conv2d(1024, 512, kernel_size=1)
+    conv7 = nn.Conv2d(1024, 1024, kernel_size=1)
+    # conv7 = nn.Conv2d(1024, 512, kernel_size=1)
     if batch_norm:
-        layers += [pool5, conv6, nn.BatchNorm2d(1024),
-                   nn.ReLU(inplace=True), conv7, nn.BatchNorm2d(512), nn.ReLU(inplace=True)]
+        layers += [pool5, conv6, nn.BatchNorm2d(conv6.out_channels),
+                   nn.ReLU(inplace=True), conv7, nn.BatchNorm2d(conv7.out_channels), nn.ReLU(inplace=True)]
     else:
         layers += [pool5, conv6,
                nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
@@ -349,32 +436,32 @@ class PreModule(nn.Module):
     def forward(self, x):
         return self.extend(x) + self.pm(x)
 
-if __name__ == '__main__':
-    # # resnet101:[3,4,22,3], resnet50:[3,4,6,3], resnet18:[2,2,2,2]
-    img = cv2.resize(cv2.imread('../demo/comp/ILSVRC2015_val_00020001/3.jpg'), (512,512))
-    img_torch = torch.from_numpy(img).unsqueeze(0).permute(0, 3, 1, 2).type(torch.FloatTensor).repeat(2,1,1,1)
-    img_torch -= 128.
-    img_torch /= 255.
-    print(img_torch.size())
-    extra_cfg = [256, 'S', 512, 256, 'S', 512, 256, 'S', 512, 256, 'S', 512] #[256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512]
-    mb_cfg = [6, 6, 6, 6, 6, 4, 4] # [4, 6, 6, 6, 4, 4]
-    model = ResNetSSD(Bottleneck, [2, 2, 2, 2], extra_cfg, mb_cfg, 3)
-    x = model.conv1(img_torch)
-    x = model.bn1(x)
-    x = model.maxpool(x)
-
-    x = model.layer1(x)
-    x = model.layer2(x)
-    x = model.layer3(x)
-    x = model.layer4(x)
-
-    x = model.avgpool(x)
-    x = model.conv5_pre(x)
-
-    x = model.conv5(x)
-
-    for i, ex in enumerate(model.extra_layers):
-        print(i)
-        x = ex(x)
-
-    pass
+# if __name__ == '__main__':
+#     # # resnet101:[3,4,22,3], resnet50:[3,4,6,3], resnet18:[2,2,2,2]
+#     img = cv2.resize(cv2.imread('../demo/comp/ILSVRC2015_val_00020001/3.jpg'), (512,512))
+#     img_torch = torch.from_numpy(img).unsqueeze(0).permute(0, 3, 1, 2).type(torch.FloatTensor).repeat(2,1,1,1)
+#     img_torch -= 128.
+#     img_torch /= 255.
+#     print(img_torch.size())
+#     extra_cfg = [256, 'S', 512, 256, 'S', 512, 256, 'S', 512, 256, 'S', 512] #[256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512]
+#     mb_cfg = [6, 6, 6, 6, 6, 4, 4] # [4, 6, 6, 6, 4, 4]
+#     model = ResNetSSD(Bottleneck, [2, 2, 2, 2], extra_cfg, mb_cfg, 3)
+#     x = model.conv1(img_torch)
+#     x = model.bn1(x)
+#     x = model.maxpool(x)
+#
+#     x = model.layer1(x)
+#     x = model.layer2(x)
+#     x = model.layer3(x)
+#     x = model.layer4(x)
+#
+#     x = model.avgpool(x)
+#     x = model.conv5_pre(x)
+#
+#     x = model.conv5(x)
+#
+#     for i, ex in enumerate(model.extra_layers):
+#         print(i)
+#         x = ex(x)
+#
+#     pass

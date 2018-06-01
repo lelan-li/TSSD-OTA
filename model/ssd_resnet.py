@@ -4,40 +4,24 @@ import torch.nn.functional as F
 from layers import *
 from data import VOC_300, VOC_512
 import os
-from .networks import ConvAttention, Bottleneck, PreModule
+from .networks import Bottleneck, PreModule, mbox
 
 class SSD_ResNet(nn.Module):
-    """Single Shot Multibox Architecture
-    The network is composed of a base VGG network followed by the
-    added multibox conv layers.  Each multibox layer branches into
-        1) conv2d for class conf scores
-        2) conv2d for localization predictions
-        3) associated priorbox layer to produce default bounding
-           boxes specific to the layer's feature map size.
-    See: https://arxiv.org/pdf/1512.02325.pdf for more details.
 
-    Args:
-        phase: (string) Can be "test" or "train"
-        base: VGG16 layers for input, size of either 300 or 500
-        extras: extra layers that feed to multibox loc and conf layers
-        head: "multibox head" consists of loc and conf conv layers
-    """
-
-    def __init__(self, phase, res_layers, extra_cfg, mb_cfg, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, prior='VOC_ResNet_300', pm=0., device= torch.device('cpu')):
+    def __init__(self, phase, res_layers, extra_cfg, mb_cfg, num_classes, size=300, pm=0.):
         super(SSD_ResNet, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
-        self.device = device
         self.pm_flag= (True, False)[pm == 0.0]
-        if prior=='VOC_300':
-            self.priorbox = PriorBox(VOC_300)
-        elif prior=='VOC_512':
-            self.priorbox = PriorBox(VOC_512)
-        else:
-            print('Unkown prior type')
+        # if prior=='VOC_300':
+        #     self.priorbox = PriorBox(VOC_300)
+        # elif prior=='VOC_512':
+        #     self.priorbox = PriorBox(VOC_512)
+        # else:
+        #     print('Unkown prior type')
 
-        with torch.no_grad():
-            self.priors = self.priorbox.forward().to(self.device)
+        # with torch.no_grad():
+        #     self.priors = self.priorbox.forward().to(self.device)
         self.size = size
 
         # ResNet
@@ -105,9 +89,9 @@ class SSD_ResNet(nn.Module):
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
 
-        if phase == 'test':
-            self.softmax = nn.Softmax(dim=1)
-            self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
+        # if phase == 'test':
+        self.softmax = nn.Softmax(dim=1)
+            # self.detect = Detect(num_classes, 0, top_k=top_k, conf_thresh=thresh, nms_thresh=nms_thresh)
                                 # num_classes, bkg_label, top_k, conf_thresh, nms_thresh
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -127,28 +111,10 @@ class SSD_ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        """Applies network layers and ops on input image(s) x.
 
-        Args:
-            x: input image or batch of images. Shape: [batch,3*batch,300,300].
-
-        Return:
-            Depending on phase:
-            test:
-                Variable(tensor) of output class label predictions,
-                confidence score, and corresponding location predictions for
-                each object detected. Shape: [batch,topk,7]
-
-            train:
-                list of concat outputs from:
-                    1: confidence layers, Shape: [batch*num_priors,num_classes]
-                    2: localization layers, Shape: [batch,num_priors*4]
-                    3: priorbox layers, Shape: [2,num_priors*4]
-        """
         sources = list()
         loc = list()
         conf = list()
-        a_map = list()
 
         for i in range(6):
             x = self.backbone[i](x)
@@ -172,18 +138,18 @@ class SSD_ResNet(nn.Module):
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
-            output = self.detect(
+            output = (
                 loc.view(loc.size(0), -1, 4),                   # loc preds
                 self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                self.priors,                 # default boxes
+                # self.priors,                 # default boxes
             )
         else:
             output = (
                 loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes),
-                self.priors,
+                # self.priors,
             )
-        return output, tuple(a_map)
+        return output
 
     def load_weights(self, base_file):
         other, ext = os.path.splitext(base_file)
@@ -194,18 +160,12 @@ class SSD_ResNet(nn.Module):
         else:
             print('Sorry only .pth and .pkl files supported.')
 
-
-mbox = {
-    'VOC_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-    'VOC_512': [6, 6, 6, 6, 6, 4, 4],
-}
 extras = {
-    'ResNet300': [256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512],
-    'ResNet512': [256, 'S', 512, 256, 'S', 512, 256, 'S', 512, 256, 'S', 512],
+    '300': [256, 'S', 512, 256, 'S', 512, 256, 512, 256, 512],
+    '512': [256, 'S', 512, 256, 'S', 512, 256, 'S', 512, 256, 'S', 512],
 }
 
-def build_ssd_resnet(phase, backbone='ResNet18', size=300, num_classes=21, top_k=200, thresh=0.01, prior='VOC_300',
-              nms_thresh=0.45, pm=0., device=torch.device('cpu')):
+def build_net(phase, backbone='ResNet18',prior='VOC_300', size=300, num_classes=21, pm=0.):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -213,8 +173,6 @@ def build_ssd_resnet(phase, backbone='ResNet18', size=300, num_classes=21, top_k
         print("Error: Sorry only SSD300/512 is supported currently!")
         return
     if backbone == 'ResNet18':
-        res_layers = [2,2,2,2]
-    elif backbone == 'ResNet34':
         res_layers = [2,2,2,2]
     elif backbone == 'ResNet50':
         res_layers = [3, 4, 6, 3]
@@ -224,6 +182,5 @@ def build_ssd_resnet(phase, backbone='ResNet18', size=300, num_classes=21, top_k
         print("Error: Unknown model!")
         return
 
-    return SSD_ResNet(phase,res_layers, extras['ResNet'+str(size)], mbox[prior], num_classes,size=size,
-                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, prior=prior, pm=pm, device=device)
+    return SSD_ResNet(phase,res_layers, extras[str(size)], mbox[prior], num_classes,size=size, pm=pm)
 

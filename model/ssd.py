@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from layers import *
 from data import VOC_300, MOT_300, VOC_512
 import os
-from .networks import vgg, add_extras, ConvAttention, ConvLSTMCell, ConvGRUCell
+from .networks import vgg, vgg_base, add_extras,extras, mbox, ConvAttention, ConvLSTMCell, ConvGRUCell
 
 class SSD(nn.Module):
     """Single Shot Multibox Architecture
@@ -23,22 +23,20 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False, prior='v2', device=torch.device('cuda')):
+    def __init__(self, phase, base, extras, head, num_classes, size=300, top_k=200, thresh=0.01, nms_thresh=0.45, attention=False):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
         self.attention_flag = attention
-        self.device = device
-        # TODO: implement __call__ in PriorBox
-        if prior=='VOC_300':
-            self.priorbox = PriorBox(VOC_300)
-        elif prior=='MOT_300':
-            self.priorbox = PriorBox(MOT_300)
-        elif prior=='VOC_512':
-            self.priorbox = PriorBox(VOC_512)
+        # if prior=='VOC_300':
+        #     self.priorbox = PriorBox(VOC_300)
+        # elif prior=='MOT_300':
+        #     self.priorbox = PriorBox(MOT_300)
+        # elif prior=='VOC_512':
+        #     self.priorbox = PriorBox(VOC_512)
 
-        with torch.no_grad():
-            self.priors = self.priorbox.forward().to(self.device)
+        # with torch.no_grad():
+        #     self.priors = self.priorbox.forward().to(self.device)
         self.size = size
 
         # SSD network
@@ -139,23 +137,21 @@ class SSD(nn.Module):
 class TSSD(nn.Module):
 
     def __init__(self, phase, base, extras, head, num_classes, lstm='lstm', size=300,
-                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False, prior='v2', cuda=True,
-                 tub=0, tub_thresh=1.0, tub_generate_score=0.7, device=torch.device('cpu')):
+                 top_k=200,thresh= 0.01,nms_thresh=0.45, attention=False,
+                 tub=0, tub_thresh=1.0, tub_generate_score=0.7):
         super(TSSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
-        self.device = device
 
-        # TODO: implement __call__ in PriorBox
-        if prior=='VOC_300':
-            self.priorbox = PriorBox(VOC_300)
-        elif prior=='MOT_300':
-            self.priorbox = PriorBox(MOT_300)
-        elif prior=='VOC_512':
-            self.priorbox = PriorBox(VOC_512)
-
-        with torch.no_grad():
-            self.priors = self.priorbox.forward().to(self.device)
+        # if prior=='VOC_300':
+        #     self.priorbox = PriorBox(VOC_300)
+        # elif prior=='MOT_300':
+        #     self.priorbox = PriorBox(MOT_300)
+        # elif prior=='VOC_512':
+        #     self.priorbox = PriorBox(VOC_512)
+        #
+        # with torch.no_grad():
+        #     self.priors = self.priorbox.forward().to(self.device)
         self.size = size
         self.attention_flag = attention
         # SSD network
@@ -238,7 +234,7 @@ class TSSD(nn.Module):
                 output = (
                     loc.view(loc.size(0), -1, 4),
                     conf.view(conf.size(0), -1, self.num_classes),
-                    self.priors,
+                    # self.priors,
                 )
                 seq_output.append(output)
                 seq_a_map.append(tuple(a_map))
@@ -304,14 +300,14 @@ class TSSD(nn.Module):
                 output = self.detect(
                     loc.view(loc.size(0), -1, 4),  # loc preds
                     self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                    self.priors,  # default boxes
+                    # self.priors,  # default boxes
                     tub_tensor
                 )
             else:
                 output = self.detect(
                     loc.view(loc.size(0), -1, 4),  # loc preds
                     self.softmax(conf.view(-1, self.num_classes)),  # conf preds
-                    self.priors,  # default boxes
+                    # self.priors,  # default boxes
                 )
 
             return output, state, tuple(a_map)
@@ -351,25 +347,8 @@ def multibox(vgg, extra_layers, cfg, num_classes, lstm=None, phase='train', batc
     return vgg, extra_layers, (loc_layers, conf_layers, rnn_layer)
 
 
-base = {
-    '300': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
-            512, 512, 512], # output channel
-    '512': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
-            512, 512, 512],
-}
-extras = {
-    '300': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
-    '512': [256, 'S', 512, 128, 'S', 256, 128, 'S', 256, 128, 'S', 256],
-}
-mbox = {
-    'VOC_300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-    'MOT_300': [5, 5, 5, 5, 5, 5],
-    'VOC_512': [6, 6, 6, 6, 6, 4, 4],
-}
-
-
-def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_300', bn=False,
-              nms_thresh=0.45, attention=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7, device=torch.device('cpu')):
+def build_net(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.01, prior='VOC_300', bn=False,
+              nms_thresh=0.45, attention=False, tub=0, tub_thresh=1.0, tub_generate_score=0.7):
     if phase != "test" and phase != "train":
         print("Error: Phase not recognized")
         return
@@ -377,15 +356,15 @@ def build_ssd(phase, size=300, num_classes=21, tssd='ssd', top_k=200, thresh=0.0
         print("Error: Sorry only SSD300 is supported currently!")
         return
     if tssd == 'ssd':
-        return SSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
+        return SSD(phase, *multibox(vgg(vgg_base[str(size)], 3, batch_norm=bn),
                                     add_extras(extras[str(size)], 512, batch_norm=bn, size=size),
                                     mbox[prior], num_classes, phase=phase, batch_norm=bn), num_classes,size=size,
-                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior, device=device)
+                   top_k=top_k,thresh= thresh,nms_thresh=nms_thresh, attention=attention, prior=prior)
     else:
-        return TSSD(phase, *multibox(vgg(base[str(size)], 3, batch_norm=bn),
+        return TSSD(phase, *multibox(vgg(vgg_base[str(size)], 3, batch_norm=bn),
                                 add_extras(extras[str(size)], 512, size=size),
                                 mbox[prior], num_classes, lstm=tssd, phase=phase,batch_norm=bn),
                     num_classes, lstm=tssd, size=size, top_k=top_k, thresh=thresh, prior=prior,
                     nms_thresh=nms_thresh, attention=attention,
-                    tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score, device=device
+                    tub=tub, tub_thresh=tub_thresh, tub_generate_score=tub_generate_score
                     )

@@ -44,7 +44,7 @@ class MultiBoxLoss(nn.Module):
         self.neg_overlap = neg_overlap
         self.variance = cfg['variance']
 
-    def forward(self, predictions, targets):
+    def forward(self, predictions, priors, targets):
         """Multibox Loss
         Args:
             predictions (tuple): A tuple containing loc preds, conf preds,
@@ -56,10 +56,10 @@ class MultiBoxLoss(nn.Module):
             ground_truth (tensor): Ground truth boxes and labels for a batch,
                 shape: [batch_size,num_objs,5] (last idx is the label).
         """
-        loc_data, conf_data, priors = predictions
+        loc_data, conf_data = predictions
         num = loc_data.size(0) # batch
-        priors = priors[:loc_data.size(1), :]
-        num_priors = (priors.size(0))
+        # priors = priors[:loc_data.size(1), :]
+        num_priors = priors.size(0)
         # num_classes = self.num_classes
 
         # match priors (default boxes) and ground truth boxes
@@ -135,7 +135,7 @@ class seqMultiBoxLoss(nn.Module):
             self.output = torch.zeros(1, self.num_classes, self.top_k, 5).to(self.device)
             self.past_score = None
 
-    def forward(self, seq_predictions, targets):
+    def forward(self, seq_predictions, priors, targets):
         # seq_predictions: [time, batch, (loc, conf, prior)]
         # targets: [batch, time, Var(1,5)]
         seq_loss_l = 0
@@ -143,14 +143,10 @@ class seqMultiBoxLoss(nn.Module):
         loss_association = 0
         self.past_score = None
         for time_step, predictions in enumerate(seq_predictions):
-            loc_data, conf_data, priors = predictions
+            loc_data, conf_data = predictions
             num = loc_data.size(0) # batch
-            if priors.dim() == 3:
-                # priors = [p[:loc_data.size(1), :] for p in priors]
-                num_priors = (priors[0].size(0))
-            else:
-                priors = priors[:loc_data.size(1), :]
-                num_priors = (priors.size(0))
+            # priors = priors[:loc_data.size(1), :]
+            num_priors = (priors.size(0))
 
             # match priors (default boxes) and ground truth boxes
             loc_t = torch.Tensor(num, num_priors, 4)
