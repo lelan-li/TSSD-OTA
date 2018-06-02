@@ -128,7 +128,6 @@ utils/*.txt
 select_frames.py
 res/
 Intro/
-exp/
 comp/
 arch/
 OTA/

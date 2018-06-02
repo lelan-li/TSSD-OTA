@@ -1,4 +1,4 @@
-type='ssd_uw'
+type='ssd_voc'
 if [ $type = 'ssd_mot' ]
 then
     python ../train.py \
@@ -53,7 +53,39 @@ then
     --bn 'no' \
     --backbone 'RefineDet_VGG' \
     --refine 'no' \
-    --drop 'yes' \
+    --drop 0.2 \
+    --pm 0.0 \
+    --basenet 'vgg16_reducedfc.pth'
+#    --resume '../weights040/UW/ssd300res50_UW/ssd300_UW_10000.pth' \
+#    --start_iter 10000
+elif [ $type = 'ssd_voc' ]
+then
+    python ../train.py \
+    --lr 0.001 \
+    --gamma 0.1 \
+    --momentum 0.9 \
+    --visdom 'yes' \
+    --send_images_to_visdom 'no' \
+    --save_folder '../weights040/VOC/ssd512RefineFalse_VOCb32' \
+    --model_name ssd \
+    --ssd_dim 512 \
+    --step_list 80000 100000 120000 \
+    --save_interval 5000 \
+    --batch_size 32 \
+    --gpu_ids '2,3' \
+    --dataset_name 'VOC0712' \
+    --set_file_name 'train' \
+    --augm_type 'ssd' \
+    --num_workers 8 \
+    --tssd 'ssd' \
+    --attention 'no' \
+    --association 'no' \
+    --loss_coe 1.0 1.0 0.5 2.0 \
+    --freeze 0 \
+    --bn 'no' \
+    --backbone 'RefineDet_VGG' \
+    --refine 'no' \
+    --drop 1.0 \
     --pm 0.0 \
     --basenet 'vgg16_reducedfc.pth'
 #    --resume '../weights040/UW/ssd300res50_UW/ssd300_UW_10000.pth' \

@@ -72,9 +72,9 @@ VOC_320 = {
 
     'min_sizes': [32, 64, 128, 256],
 
-    'max_sizes': [50, 100, 170, 290],
+    'max_sizes': [],
 
-    'aspect_ratios': [[2,3], [2,3], [2,3], [2,3]],
+    'aspect_ratios': [[2], [2], [2], [2]],
 
     'variance': [0.1, 0.2],
 
@@ -84,6 +84,29 @@ VOC_320 = {
 
     'name': 'VOC_320',
 }
+
+VOC_512_RefineDet = {
+    'feature_maps': [64, 32, 16, 8],
+
+    'min_dim': 512,
+
+    'steps': [8, 16, 32, 64],
+
+    'min_sizes': [32, 64, 128, 256],
+
+    'max_sizes': [],
+
+    'aspect_ratios': [[2], [2], [2], [2]],
+
+    'variance': [0.1, 0.2],
+
+    'clip': True,
+
+    'flip': True,
+
+    'name': 'VOC_512_RefineDet',
+}
+
 
 VOC_512= {
     'feature_maps' : [64, 32, 16, 8, 4, 2, 1],
@@ -178,4 +201,4 @@ COCO_512= {
 }
 
 mb_cfg = {'VOC_300':VOC_300, 'VOC_320':VOC_320, 'VOC_512':VOC_512, 'MOT_300':MOT_300,
-          'COCO_300':COCO_300, 'COCO_512':COCO_512}
+          'COCO_300':COCO_300, 'COCO_512':COCO_512, 'VOC_512_RefineDet': VOC_512_RefineDet}

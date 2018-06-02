@@ -8,14 +8,18 @@ from .networks import vgg, vgg_base
 
 class RefineSSD(nn.Module):
 
-    def __init__(self, size, num_classes, use_refine=False, phase='train', dropout=False):
+    def __init__(self, size, num_classes, use_refine=False, phase='train', dropout=1.0):
         super(RefineSSD, self).__init__()
         self.num_classes = num_classes
         self.size = size
         self.use_refine = use_refine
         self.phase = phase
-        self.dropout = dropout
-        self.box_num = 6
+        if dropout>0. and dropout<1.:
+            self.dropout = True
+            self.dropout_p = dropout
+        else:
+            self.dropout = False
+        self.box_num = 3
 
         # SSD network
         self.backbone = nn.ModuleList(vgg(vgg_base['320'], 3, pool5_ds=True))
@@ -86,7 +90,7 @@ class RefineSSD(nn.Module):
         for k in range(23):
             x = self.backbone[k](x)
         if self.dropout:
-            x = F.dropout(x, 0.5, training=self.istraining)
+            x = F.dropout(x, self.dropout_p, training=self.istraining)
         norm_s = self.L2Norm_4_3(x)
 
         arm_sources.append(norm_s)
@@ -95,7 +99,7 @@ class RefineSSD(nn.Module):
         for k in range(23, 30):
             x = self.backbone[k](x)
         if self.dropout:
-            x = F.dropout(x, 0.5, training=self.istraining)
+            x = F.dropout(x, self.dropout_p, training=self.istraining)
         norm_s = self.L2Norm_5_3(x)
         arm_sources.append(norm_s)
 
@@ -103,12 +107,12 @@ class RefineSSD(nn.Module):
         for k in range(30, len(self.backbone)):
             x = self.backbone[k](x)
         if self.dropout:
-            x = F.dropout(x, 0.5, training=self.istraining)
+            x = F.dropout(x, self.dropout_p, training=self.istraining)
         arm_sources.append(x)
         # conv6_2
         x = self.extras(x)
         if self.dropout:
-            x = F.dropout(x, 0.5, training=self.istraining)
+            x = F.dropout(x, self.dropout_p, training=self.istraining)
         arm_sources.append(x)
         # apply multibox head to arm branch
         if self.use_refine:
@@ -119,7 +123,7 @@ class RefineSSD(nn.Module):
             arm_conf = torch.cat([o.view(o.size(0), -1) for o in arm_conf_list], 1)
         x = self.last_layer_trans(x)
         if self.dropout:
-            x = F.dropout(x, 0.5, training=self.istraining)
+            x = F.dropout(x, self.dropout_p, training=self.istraining)
         obm_sources.append(x)
 
         # get transformed layers
@@ -132,7 +136,7 @@ class RefineSSD(nn.Module):
         for (t, u, l) in zip(trans_layer_list, self.up_layers, self.latent_layrs):
             x = F.relu(l(F.relu(u(x) + t, inplace=True)), inplace=True)
             if self.dropout:
-                x = F.dropout(x, 0.5, training=self.istraining)
+                x = F.dropout(x, self.dropout_p, training=self.istraining)
             obm_sources.append(x)
         obm_sources.reverse()
         for (s, l, c) in zip(obm_sources, self.odm_loc, self.odm_conf):
@@ -182,9 +186,9 @@ class RefineSSD(nn.Module):
             print('Sorry only .pth and .pkl files supported.')
 
 
-def build_net(phase, size=320, num_classes=21, use_refine=False, dropout=False):
-    if size != 320:
-        print("Error: Sorry only RefDetSSD320 is supported currently!")
+def build_net(phase, size=320, num_classes=21, use_refine=False, dropout=1.0):
+    if size not in [320, 512]:
+        print("Error: Sorry only RefDetSSD320/512 is supported currently!")
         return
 
     return RefineSSD(size, num_classes=num_classes, use_refine=use_refine, phase=phase, dropout=dropout)

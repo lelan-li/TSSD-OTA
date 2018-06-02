@@ -45,7 +45,7 @@ parser.add_argument('--backbone', default='VGG16', type=str, help='Backbone')
 parser.add_argument('--refine', default=False, type=str2bool, help='refine symbol for RefineDet')
 parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
 parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
-parser.add_argument('--literation', default='20000', type=str,help='File path to save results')
+parser.add_argument('--iteration', default='20000', type=str,help='File path to save results')
 parser.add_argument('--model_dir', default='../weights/tssd300_VID2017_b4_s16_SkipShare_preVggExtraLocConf', type=str,help='Path to save model')
 parser.add_argument('--detection', default='no', type=str2bool, help='detection or not')
 parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
@@ -96,12 +96,12 @@ dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
 pkl_dir = os.path.join(args.save_folder, args.model_dir.split('/')[-1])
 if args.model_dir.split('/')[-1] in ['ssd300_VIDDET', 'ssd300_VIDDET_186', 'ssd300c512_VIDDET','ssd300_VIDDET_512','attssd300_VIDDET_512', 'attssd300_VIDDET_512_atthalf']:
-    trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation +'.pth')
+    trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.iteration +'.pth')
 else:
     if args.tssd in ['tblstm', 'gru']:
-        trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + 'seq'+ args.dataset_name +'_'+ args.literation +'.pth')
+        trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + 'seq'+ args.dataset_name +'_'+ args.iteration +'.pth')
     else:
-        trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + args.dataset_name +'_'+ args.literation +'.pth')
+        trained_model = os.path.join(args.model_dir, args.model_name+str(args.ssd_dim)+'_' + args.dataset_name +'_'+ args.iteration +'.pth')
 
 class Timer(object):
     """A simple timer."""
@@ -219,7 +219,7 @@ def do_python_eval(output_dir='output', use_07=True, FPS=None):
     with open(os.path.join(output_dir, str(np.mean(aps))[2:6])+'.txt', 'w') as res_file:
         res_file.write('CUDA: '+ str(args.cuda)+ '\n')
         res_file.write('model_dir: '+ args.model_dir+ '\n')
-        res_file.write('literation: '+ args.literation+ '\n')
+        res_file.write('iteration: '+ args.iteration+ '\n')
         res_file.write('model_name: '+ args.model_name+ '\n')
         res_file.write('backbone : '+ args.backbone + '\n')
         if args.backbone in ['RefineDet_VGG']:
@@ -441,7 +441,7 @@ def test_net(save_folder, net, dataset, transform, top_k, detector, priors,
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     all_time = 0.
-    output_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
+    output_dir = get_output_dir(pkl_dir, args.iteration+'_'+args.dataset_name+'_'+ args.set_file_name)
     det_file = os.path.join(output_dir, 'detections.pkl')
     state = [None] * 6 if tssd in ['tblstm', 'gru'] else None
     pre_video_name = None
@@ -536,10 +536,10 @@ if __name__ == '__main__':
                         attention=args.attention, #o_ratio=args.oa_ratio[0], a_ratio=args.oa_ratio[1],
                         bn=args.bn,
                         )
-        print('loading model!', args.model_dir, args.literation)
+        print('loading model!', args.model_dir, args.iteration)
         net.load_state_dict(torch.load(trained_model))
         net.eval()
-        print('Finished loading model!', args.model_dir, args.literation,'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
+        print('Finished loading model!', args.model_dir, args.iteration,'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
         detector = Detect(num_classes, 0, args.top_k, args.confidence_threshold, args.nms_threshold, tub=0, tub_thresh=1.0, tub_generate_score=0.7 )
         priorbox = PriorBox(cfg)
         with torch.no_grad():
@@ -551,8 +551,8 @@ if __name__ == '__main__':
                  BaseTransform(net.size, dataset_mean), args.top_k, detector, priors, im_size=ssd_dim,
                  thresh=args.confidence_threshold, tssd=args.tssd)
     else:
-        out_dir = get_output_dir(pkl_dir, args.literation+'_'+args.dataset_name+'_'+ args.set_file_name)
+        out_dir = get_output_dir(pkl_dir, args.iteration+'_'+args.dataset_name+'_'+ args.set_file_name)
         print('Without detection', out_dir)
         do_python_eval(out_dir)
-    print('Finished!', args.model_dir, args.literation, 'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
+    print('Finished!', args.model_dir, args.iteration, 'tub='+str(args.tub), 'tub_thresh='+str(args.tub_thresh), 'tub_score='+str(args.tub_generate_score))
 

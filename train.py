@@ -75,7 +75,7 @@ parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='s
 parser.add_argument('--backbone', default='RefineDet_VGG', type=str, help='Backbone')
 parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
 parser.add_argument('--refine', default=True, type=str2bool, help='Only work when backbone==RefineDet')
-parser.add_argument('--drop', default=False, type=str2bool, help='DropOut, Only work when backbone==RefineDet')
+parser.add_argument('--drop', default=1.0, type=float, help='DropOut, Only work when backbone==RefineDet')
 parser.add_argument('--model_name', default='ssd', type=str, help='which model selected')
 parser.add_argument('--ssd_dim', default=320, type=int, help='ssd_dim 300, 320 or 512')
 parser.add_argument('--gpu_ids', default='1,0', type=str, help='gpu number')
@@ -119,6 +119,8 @@ if args.dataset_name in ['MOT15', 'seqMOT15']:
     cfg = mb_cfg[prior]
 else:
     prior = 'VOC_'+ str(args.ssd_dim)
+    if args.ssd_dim==512 and args.backbone in ['RefineDet_VGG']:
+        prior += '_RefineDet'
     cfg = mb_cfg[prior]
 
 train_sets, num_classes, data_root = dataset_training_cfg[args.dataset_name]
