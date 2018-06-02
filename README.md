@@ -1,10 +1,11 @@
-## Temporally Identity-Aware SSD with Attentional LSTM
+# Temporally Identity-Aware SSD with Attentional LSTM
 
-This repository is initially based on [ssd.pytorch](https://github.com/amdegroot/ssd.pytorch).
+## Project
+This repository is initially based on [ssd.pytorch](https://github.com/amdegroot/ssd.pytorch), and based on pytorch v0.40
 [arXiv paper](https://arxiv.org/abs/1803.00197) describes this project in detail.
+
 
 If you use this code for your research, please cite:
 
 **Xingyu Chen, Junzhi Yu, and Zhengxing Wu, "Temporally Identity-Aware SSD with Attentional LSTM", *arXiv:1803.00197*, 2018.**
 
-The useage will be updated soon.
