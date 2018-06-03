@@ -49,14 +49,11 @@ def orthogonal_weights_init(m):
         orthogonal(m.weight.data)
         m.bias.data.fill_(1)
 
-def net_init(ssd_net, backbone,resume_from_ssd='ssd', tssd='ssd', attention=False, pm=0.0, refine=False):
+def net_init(ssd_net, backbone,resume_from_ssd='ssd', attention=False, pm=0.0, refine=False):
     if resume_from_ssd != 'ssd':
         if attention:
             print('Initializing Attention weights...')
             ssd_net.attention.apply(conv_weights_init)
-        if tssd in ['gru', 'tblstm']:
-            print('Initializing RNN weights...')
-            ssd_net.rnn.apply(orthogonal_weights_init)
     else:
         print('Initializing extra, loc, conf weights...')
         # initialize newly added layers' weights with xavier method
@@ -66,7 +63,7 @@ def net_init(ssd_net, backbone,resume_from_ssd='ssd', tssd='ssd', attention=Fals
             ssd_net.conf.apply(conv_weights_init)
             if pm != 0.0:
                 ssd_net.pm.apply(conv_weights_init)
-        elif backbone in ['RefineDet_VGG']:
+        elif backbone[:9] == 'RefineDet':
             ssd_net.extras.apply(weights_init)
             ssd_net.trans_layers.apply(weights_init)
             ssd_net.latent_layrs.apply(weights_init)
@@ -75,19 +72,19 @@ def net_init(ssd_net, backbone,resume_from_ssd='ssd', tssd='ssd', attention=Fals
             ssd_net.odm_conf.apply(weights_init)
             if refine:
                 ssd_net.arm_loc.apply(weights_init)
-                ssd_net.arm_conf.apply(weights_init)
+                if attention:
+                    ssd_net.arm_att.apply(conv_weights_init)
+                else:
+                    ssd_net.arm_conf.apply(weights_init)
             if pm != 0.0:
                 ssd_net.pm.apply(conv_weights_init)
         else:
             ssd_net.extras.apply(weights_init)
             ssd_net.loc.apply(weights_init)
             ssd_net.conf.apply(weights_init)
-        if tssd in ['gru', 'tblstm']:
-            print('Initializing RNN weights...')
-            ssd_net.rnn.apply(orthogonal_weights_init)
-        if attention:
-            print('Initializing Attention weights...')
-            ssd_net.attention.apply(conv_weights_init)
+            if attention:
+                print('Initializing Attention weights...')
+                ssd_net.attention.apply(conv_weights_init)
 # This function is derived from torchvision VGG make_layers()
 # https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
 def vgg(cfg, i, batch_norm=False, pool5_ds=False):
@@ -150,21 +147,42 @@ def add_extras(cfg, i, batch_norm=False, size=300):
 
 class ConvAttention(nn.Module):
 
-    def __init__(self, inchannel):
+    def __init__(self, inchannel, residual=False, channel=False, spatial_size=None):
         super(ConvAttention, self).__init__()
-        self.attention = nn.Sequential(
-            nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.LeakyReLU(0.2),
-            # nn.ConvTranspose2d(int(inchannel/2), int(inchannel/4), kernel_size=3, stride=2, padding=1, output_padding=0, bias=False),
-            nn.Conv2d(inchannel, inchannel, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(inchannel, 1, kernel_size=3, stride=1, padding=1, bias=False),
+        self.residual = residual
+        self.channel = channel
+        self.spatial_att = nn.Sequential(
+            nn.Conv2d(inchannel, int(inchannel/4), kernel_size=1, stride=1, padding=0, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(int(inchannel/4), int(inchannel/4), kernel_size=3, stride=1, padding=1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(int(inchannel/4), int(inchannel/4), kernel_size=3, stride=1, padding=1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(int(inchannel/4), 1, kernel_size=1, stride=1, padding=0, bias=False),
             nn.Sigmoid()
         )
+        if channel and spatial_size:
+            self.channel_att = nn.Sequential(
+                nn.AvgPool2d(spatial_size),
+                nn.Conv2d(inchannel, int(inchannel/2), kernel_size=1, stride=1, padding=0, bias=False),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(int(inchannel / 2), int(inchannel / 4), kernel_size=1, stride=1, padding=0, bias=False),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(int(inchannel / 4), int(inchannel / 2), kernel_size=1, stride=1, padding=0, bias=False),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(int(inchannel / 2), inchannel, kernel_size=1, stride=1, padding=0, bias=False),
+                nn.Sigmoid()
+            )
+
     def forward(self, feats):
-        return self.attention(feats)
-
-
+        s = self.spatial_att(feats)
+        x = s * feats
+        if self.residual:
+            x = x + feats
+        if self.channel:
+            c = self.channel_att(x)
+            x = x * c.expand_as(x)
+        return x, s
 
 # https://www.jianshu.com/p/72124b007f7d
 class ConvLSTMCell(nn.Module):

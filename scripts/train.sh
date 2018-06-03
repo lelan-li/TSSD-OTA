@@ -65,10 +65,10 @@ then
     --gamma 0.1 \
     --momentum 0.9 \
     --visdom 'yes' \
-    --send_images_to_visdom 'no' \
-    --save_folder '../weights040/VOC/ssd512RefineFalse_VOCb32' \
+    --send_images_to_visdom 'yes' \
+    --save_folder '../weights040/VOC/ssd320RefineTrueAtt2_VOCb32' \
     --model_name ssd \
-    --ssd_dim 512 \
+    --ssd_dim 320 \
     --step_list 80000 100000 120000 \
     --save_interval 5000 \
     --batch_size 32 \
@@ -77,14 +77,13 @@ then
     --set_file_name 'train' \
     --augm_type 'ssd' \
     --num_workers 8 \
-    --tssd 'ssd' \
-    --attention 'no' \
-    --association 'no' \
-    --loss_coe 1.0 1.0 0.5 2.0 \
+    --loss_coe 1.0 1.0 0.5 \
     --freeze 0 \
     --bn 'no' \
     --backbone 'RefineDet_VGG' \
-    --refine 'no' \
+    --refine 'yes' \
+    --attention 'yes' \
+    --res_attention 'no' \
     --drop 1.0 \
     --pm 0.0 \
     --basenet 'vgg16_reducedfc.pth'

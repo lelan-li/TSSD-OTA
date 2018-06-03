@@ -21,8 +21,13 @@ def print_log(args):
     logging.info('model_name: '+ args.model_name)
     logging.info('ssd_dim: '+ str(args.ssd_dim))
     logging.info('Backbone: '+ args.backbone)
-    if args.backbone == 'RefineDet_VGG':
+    if args.backbone[:9] == 'RefineDet':
         logging.info('Refine: ' + str(args.refine))
+        logging.info('Dropout: ' + str(args.drop))
+    logging.info('attention: '+ str(args.attention))
+    if args.attention:
+        logging.info('residual attention: ' + str(args.res_attention))
+        logging.info('channel attention: ' + str(args.channel_attention))
     logging.info('Predection model: '+ str(args.pm))
     if args.resume:
         logging.info('resume: '+ args.resume )
@@ -41,15 +46,14 @@ def print_log(args):
     logging.info('gpu_ids: '+ args.gpu_ids)
     logging.info('augm_type: '+ args.augm_type)
     logging.info('batch_size: '+ str(args.batch_size))
-    logging.info('attention: '+ str(args.attention))
-    logging.info('tssd: '+ args.tssd )
-    if args.tssd != 'ssd':
-        logging.info('seq_len: '+ str(args.seq_len))
-        logging.info('skip: '+ str(args.skip))
-        logging.info('association: '+ str(args.association))
-        if args.association:
-            logging.info('asso_top_k: '+ str(args.asso_top_k))
-            logging.info('asso_conf: '+ str(args.asso_conf))
+    # logging.info('tssd: '+ args.tssd )
+    # if args.tssd != 'ssd':
+    #     logging.info('seq_len: '+ str(args.seq_len))
+    #     logging.info('skip: '+ str(args.skip))
+    #     logging.info('association: '+ str(args.association))
+    #     if args.association:
+    #         logging.info('asso_top_k: '+ str(args.asso_top_k))
+    #         logging.info('asso_conf: '+ str(args.asso_conf))
     logging.info('loss weights: '+ str(args.loss_coe))
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Training')
@@ -67,10 +71,10 @@ parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='Weight decay for SGD')
 parser.add_argument('--gamma', default=0.1, type=float, help='Gamma update for SGD')
 parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss at each iteration')
-parser.add_argument('--visdom', default=True, type=str2bool, help='Use visdom to for loss visualization')
+parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='./weights040/test', help='Location to save checkpoint models')
-parser.add_argument('--dataset_name', default='UW', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
+parser.add_argument('--dataset_name', default='VOC0712', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--backbone', default='RefineDet_VGG', type=str, help='Backbone')
 parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
@@ -78,17 +82,19 @@ parser.add_argument('--refine', default=True, type=str2bool, help='Only work whe
 parser.add_argument('--drop', default=1.0, type=float, help='DropOut, Only work when backbone==RefineDet')
 parser.add_argument('--model_name', default='ssd', type=str, help='which model selected')
 parser.add_argument('--ssd_dim', default=320, type=int, help='ssd_dim 300, 320 or 512')
-parser.add_argument('--gpu_ids', default='1,0', type=str, help='gpu number')
+parser.add_argument('--gpu_ids', default='3,2', type=str, help='gpu number')
 parser.add_argument('--augm_type', default='base', type=str, help='how to transform data')
-parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
-parser.add_argument('--seq_len', default=8, type=int, help='sequence length for training')
+# parser.add_argument('--tssd',  default='ssd', type=str, help='ssd or tssd')
+# parser.add_argument('--seq_len', default=8, type=int, help='sequence length for training')
 parser.add_argument('--set_file_name',  default='train', type=str, help='train_VID_DET/train_video_remove_no_object/train, MOT dataset does not use it')
-parser.add_argument('--attention', default=False, type=str2bool, help='add attention module')
-parser.add_argument('--association', default=False, type=str2bool, help='dynamic set prior box through time')
-parser.add_argument('--asso_top_k', default=1, type=int, help='top_k for association loss')
-parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh for association loss')
-parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5, 2.0], help='coefficients for loc, conf, att, asso')
-parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
+parser.add_argument('--attention', default=True, type=str2bool, help='add attention module')
+parser.add_argument('--res_attention', default=False, type=str2bool, help='add attention module')
+parser.add_argument('--channel_attention', default=True, type=str2bool, help='add attention module')
+# parser.add_argument('--association', default=False, type=str2bool, help='dynamic set prior box through time')
+# parser.add_argument('--asso_top_k', default=1, type=int, help='top_k for association loss')
+# parser.add_argument('--asso_conf', default=0.1, type=float, help='conf thresh for association loss')
+parser.add_argument('--loss_coe', nargs='+', type=float, default=[1.0,1.0, 0.5], help='coefficients for loc, conf, att, asso')
+# parser.add_argument('--skip', default=False, type=str2bool, help='select sequence data in a skip way')
 parser.add_argument('--bn', default=False, type=str2bool, help='select sequence data in a skip way')
 parser.add_argument('--save_interval', default=5000, type=int, help='frequency of checkpoint saving')
 
@@ -119,7 +125,7 @@ if args.dataset_name in ['MOT15', 'seqMOT15']:
     cfg = mb_cfg[prior]
 else:
     prior = 'VOC_'+ str(args.ssd_dim)
-    if args.ssd_dim==512 and args.backbone in ['RefineDet_VGG']:
+    if args.ssd_dim==512 and args.backbone[:9] == 'RefineDet':
         prior += '_RefineDet'
     cfg = mb_cfg[prior]
 
@@ -146,9 +152,13 @@ if args.visdom:
 if args.backbone == 'RFB_VGG':
     from model.rfbnet_vgg import build_net
     ssd_net = build_net('train', ssd_dim, num_classes)
-elif args.backbone == 'RefineDet_VGG':
-    from model.refinedet_vgg import build_net
-    ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine, dropout=args.drop)
+elif args.backbone[:9] == 'RefineDet':
+    if args.attention:
+        from model.attrefinedet_vgg import build_net
+        ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine, dropout=args.drop, residual=args.res_attention, channel=args.channel_attention)
+    else:
+        from model.refinedet_vgg import build_net
+        ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine, dropout=args.drop)
 elif args.backbone[:6] == 'ResNet':
     from model.ssd_resnet import build_net
     ssd_net = build_net('train', backbone=args.backbone, size=ssd_dim, num_classes=num_classes, prior=prior, pm=args.pm)
@@ -203,12 +213,6 @@ if args.freeze:
     elif args.freeze == 2:
         print('Freeze backbone, extras, conf, loc')
         freeze_nets = [ssd_net.backbone, ssd_net.extras, ssd_net.conf, ssd_net.loc]
-    elif args.freeze == 3:
-        print('Freeze backbone, extras, rnn, attention, conf, loc')
-        if args.attention:
-            freeze_nets = [ssd_net.backbone, ssd_net.extras, ssd_net.rnn, ssd_net.attention, ssd_net.loc, ssd_net.conf]
-        else:
-            freeze_nets = [ssd_net.backbone, ssd_net.extras, ssd_net.rnn, ssd_net.loc, ssd_net.conf]
     else:
         freeze_nets = []
     for freeze_net in freeze_nets:
@@ -217,67 +221,30 @@ if args.freeze:
 
 if not args.resume:
     from model.networks import net_init
-    net_init(ssd_net, args.backbone, resume_from_ssd=args.resume_from_ssd, tssd=args.tssd, attention=args.attention, pm=args.pm, refine=args.refine)
+    net_init(ssd_net, args.backbone, resume_from_ssd=args.resume_from_ssd, attention=args.attention, pm=args.pm, refine=args.refine)
 
 if args.augm_type == 'ssd':
     data_transform = SSDAugmentation
 else:
     data_transform = BaseTransform
 
-
-if args.tssd in ['gru', 'tblstm']:
-    if args.freeze == 0:
-        if args.attention:
-            print('train VGG, Extras, Loc, Conf, Attention, RNN')
-            optimizer = optim.SGD([{'params': net.module.loc.parameters()},
-                                   {'params': net.module.conf.parameters()},
-                                   {'params': net.module.attention.parameters()},
-                                   {'params': net.module.vgg.parameters()},
-                                   {'params': net.module.extras.parameters()}],
-                                   lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
-        else:
-            print('train VGG, Extras, Loc, Conf, RNN')
-            optimizer = optim.SGD([{'params': net.module.loc.parameters()},
-                                {'params': net.module.conf.parameters()},
-                                {'params': net.module.vgg.parameters()},
-                                {'params': net.module.extras.parameters()}],
-                                lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
-    elif args.freeze == 1:
-        if args.attention:
-            print('train Loc, Conf, Attention, RNN')
-            optimizer = optim.SGD([{'params': net.module.loc.parameters()},
-                                    {'params': net.module.conf.parameters()},
-                                    {'params': net.module.attention.parameters()}],
-                                    lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
-        else:
-            print('train Loc, Conf, RNN')
-            optimizer = optim.SGD([{'params': net.module.loc.parameters()},
-                                  {'params': net.module.conf.parameters()}],
-                                  lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    elif args.freeze == 2:
-        print('train Attention, RNN')
-        optimizer = optim.SGD(net.module.attention.parameters(),
-                              lr=args.lr,momentum=args.momentum, weight_decay=args.weight_decay)
-    if args.freeze != 3:
-        optimizer_rnn = optim.RMSprop(net.module.rnn.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        criterion = seqMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device,
-                                association=args.association, top_k=args.asso_top_k, conf_thresh=args.asso_conf)
-        print('loss coefficients:', args.loss_coe)
-
+# optimize
+if args.freeze == 1:
+    optimizer = optim.SGD([{'params': net.module.attention.parameters(), 'lr':args.lr*10},
+                           {'params': net.module.loc.parameters()},
+                           {'params': net.module.conf.parameters()}],
+                           lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 else:
-    if args.freeze == 0:
-        optimizer = optim.SGD(net.parameters(),
-                              lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    elif args.freeze == 1:
-        optimizer = optim.SGD([{'params': net.module.attention.parameters(), 'lr':args.lr*10},
-                               {'params': net.module.loc.parameters()},
-                               {'params': net.module.conf.parameters()}],
-                               lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    if args.backbone in ['RefineDet_VGG'] and args.refine:
-        arm_criterion = RefineMultiBoxLoss(2, 0.5, True, 0, True, 3, 0.5, False, device=device)
-        criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, object_score = 0.01, device=device)
-    else:
-        criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device)
+    optimizer = optim.SGD(net.parameters(),
+                          lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+# criterion
+if args.backbone[:9] == 'RefineDet' and args.refine:
+    use_refine = True
+    arm_criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device, only_loc=args.attention)
+    criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, object_score = 0.01, device=device)
+else:
+    use_refine = False
+    criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device)
 
 if args.attention:
     att_criterion = AttentionLoss(args.ssd_dim)
@@ -292,31 +259,31 @@ def train():
     print('Loading Dataset...' + args.dataset_name)
     if args.dataset_name in ['MOT15', 'seqMOT15', 'MOT17Det', 'seqMOT17Det']:
         dataset = MOTDetection(data_root, train_sets, data_transform(
-            ssd_dim, means),dataset_name=args.dataset_name, seq_len=args.seq_len, skip=args.skip)
+            ssd_dim, means),dataset_name=args.dataset_name)
     else:
         dataset = VOCDetection(data_root, train_sets, data_transform(ssd_dim, means),
                                AnnotationTransform(dataset_name=args.dataset_name),
                                dataset_name=args.dataset_name, set_file_name=set_filename,
-                               seq_len=args.seq_len, skip=args.skip)
+                               use_mask=args.attention)
 
     epoch_size = len(dataset) // args.batch_size
 
-    print('Training TSSD on', dataset.name, ', how many videos:', len(dataset), ', sequence length:', args.seq_len, 'skip?', args.skip) if args.tssd in ['lstm', 'tblstm', 'gru'] else print('Training SSD on', dataset.name, 'dataset size:', len(dataset))
-    print('lr:',args.lr , 'steps:', stepvalues, 'max_liter:', max_iter)
+    print('Training SSD on', dataset.name, 'dataset size:', len(dataset), '\n',
+          'lr:',args.lr , 'steps:', stepvalues, 'max_liter:', max_iter)
     step_index = 0
     if args.visdom:
         # initialize visdom loss plot
         y_dim = 3
         legend = ['Loss', 'Loc Loss', 'Conf Loss',]
-        if args.backbone in ['RefineDet_VGG'] and args.refine:
-            y_dim += 2
-            legend += ['Arm Loc Loss', 'Arm conf Loss']
+        if use_refine:
+            y_dim += 1
+            legend += ['Arm Loc Loss',]
+            if not args.attention:
+                y_dim += 1
+                legend += ['Arm conf Loss',]
         if args.attention:
             y_dim += 1
             legend += ['Att Loss',]
-        if args.association:
-            y_dim += 1
-            legend += ['Asso Loss',]
         lot = viz.line(
             X=torch.zeros((1.,)),
             Y=torch.zeros((1., y_dim)),
@@ -340,73 +307,51 @@ def train():
             # adjust_learning_rate(optimizer_rnn, args.gamma, step_index)
             adjust_learning_rate(optimizer, args.gamma, step_index)
             epoch += 1
-        images, targets, masks = next(batch_iterator)
+        collected_data = next(batch_iterator)
         with torch.no_grad():
-            targets = [[seq_anno.to(device) for seq_anno in batch_anno] for batch_anno in targets] if args.dataset_name in ['seqMOT15', 'seqVID2017', 'seqUW'] \
-               else [anno.to(device) for anno in targets]
-            masks = masks.to(device)
+            images, targets = collected_data[:2]
             images = images.to(device)
+            targets = [anno.to(device) for anno in targets]
+            if args.attention:
+                masks = collected_data[2].to(device)
 
         # forward
         t0 = time.time()
         loss = torch.tensor(0., requires_grad=True).to(device)
-        if args.attention:
-            out, att = net(images)
-        # elif args.backbone in ['RefineDet_VGG'] and args.refine:
-        #     out_arm, out = net(images)
-        else:
-            out = net(images)
+        out = net(images)
         # backward
         optimizer.zero_grad()
-        if args.tssd != 'ssd':
-            optimizer_rnn.zero_grad()
-            loss_l, loss_c, loss_asso = criterion(out, priors, targets)
-        elif args.backbone in ['RefineDet_VGG'] and args.refine:
-            loss_arm_l, loss_arm_c = arm_criterion(out[:2], priors, targets)
-            loss_l, loss_c = criterion(out[2:], priors, targets, arm_data=out[:2], filter_object=True)
-            loss += args.loss_coe[0] * (loss_arm_l+loss_l) + args.loss_coe[1] * (loss_arm_c+loss_c)
+        if use_refine:
+            loss_l, loss_c = criterion(out[2:], priors, targets, arm_data=out[:2])
+            if args.attention:
+                loss_arm_l = arm_criterion(out[0], priors, targets)
+                loss += args.loss_coe[0] * loss_arm_l
+                att_maps = out[1]
+            else:
+                loss_arm_l, loss_arm_c = arm_criterion(out[:2], priors, targets)
+                loss += args.loss_coe[0] * loss_arm_l +  args.loss_coe[1] * loss_arm_c
         else:
             loss_l, loss_c = criterion(out, priors, targets)
-            loss += args.loss_coe[0] * loss_l + args.loss_coe[1] * loss_c
-        if args.tssd != 'ssd' and args.association:
-            loss += args.loss_coe[3]*loss_asso
+        loss += args.loss_coe[0] * loss_l + args.loss_coe[1] * loss_c
         if args.attention:
-            loss_att, upsampled_att_map = att_criterion(att,masks)
+            loss_att, upsampled_att_map = att_criterion(att_maps, masks)
             loss += args.loss_coe[2]*loss_att
 
         loss.backward()
-        if args.tssd != 'ssd':
-            nn.utils.clip_grad_norm_(net.module.rnn.parameters(), 5)
-            optimizer_rnn.step()
         optimizer.step()
         t1 = time.time()
 
         if iteration % 10 == 0:
-            # print('Timer: %.4f sec.' % (t1 - t0))
-            # print('iter ' + repr(iteration) + ' || Loss: %.4f, lr: %.5f||' % (loss, optimizer.param_groups[0]['lr']), end=' ')
             logging.info('iter ' + repr(iteration) + '||Loss: %.4f, lr: %.5f||Timer: %.4f sec.' % (loss, optimizer.param_groups[0]['lr'], t1 - t0))
-
             if args.visdom and args.send_images_to_visdom:
                 random_batch_index = np.random.randint(images.size(0))
-                if images.dim() == 5:
-                    for time_idx, time_step in enumerate([0,-1]):
-                        img_viz = (images[random_batch_index,time_step].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
-                        viz.image(img_viz, win=20+time_idx, opts=dict(title='seq1_frame_%s' % time_step))
-                        for scale, att_map_viz in enumerate(upsampled_att_map[time_step]):
-                            viz.heatmap(att_map_viz[random_batch_index, 0, :, :].detach().cpu().numpy()[::-1],
-                                        win=30*(time_idx+1) + scale,
-                                        opts=dict(title='seq1_attmap_time%s_scale%s' % (time_step,scale), colormap='Jet'))
-                        viz.heatmap(masks[random_batch_index, time_step, 0, :, :].cpu().numpy()[::-1],
-                                    win=80 + time_idx,
-                                    opts=dict(title='seq1_attmap_gt_%s' % time_step, colormap='Jet'))
-                else:
-                    img_viz = (images[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
-                    viz.image(img_viz, win=1, opts=dict(title='ssd_frame_gt', colormap='Jet'))
-                    for scale, att_map_viz in enumerate(upsampled_att_map):
-                        viz.heatmap(att_map_viz[random_batch_index, 0, :, :].detach().cpu().numpy()[::-1], win=2+scale,
-                            opts=dict(title='ssd_attmap_%s' % scale, colormap='Jet'))
-                    viz.heatmap(masks[random_batch_index, 0, :, :].cpu().numpy()[::-1], win=2 + len(upsampled_att_map),
-                            opts=dict(title='ssd_attmap_gt', colormap='Jet'))
+                img_viz = (images[random_batch_index].cpu().numpy().transpose(1,2,0) + mean_np).transpose(2,0,1)
+                viz.image(img_viz, win=20, opts=dict(title='ssd2_frame_gt', colormap='Jet'))
+                for scale, att_map_viz in enumerate(upsampled_att_map):
+                    viz.heatmap(att_map_viz[random_batch_index, 0, :, :].detach().cpu().numpy()[::-1], win=21+scale,
+                        opts=dict(title='ssd2_attmap_%s' % scale, colormap='Jet'))
+                viz.heatmap(masks[random_batch_index, 0, :, :].cpu().numpy()[::-1], win=21 + len(upsampled_att_map),
+                        opts=dict(title='ssd2_attmap_gt', colormap='Jet'))
 
         if args.visdom:
             y_dis = [loss.cpu(), args.loss_coe[0]*loss_l.cpu(), args.loss_coe[1]*loss_c.cpu()]
@@ -422,17 +367,24 @@ def train():
                         legend=legend,
                     )
                 )
-            if args.backbone in ['RefineDet_VGG'] and args.refine:
-                y_dis += [args.loss_coe[0]*loss_arm_l.cpu(), args.loss_coe[1]*loss_arm_c.cpu()]
+            if use_refine:
+                if args.attention:
+                    y_dis += [args.loss_coe[0]*loss_arm_l.cpu(),]
+                else:
+                    y_dis += [args.loss_coe[0]*loss_arm_l.cpu(), args.loss_coe[1]*loss_arm_c.cpu()]
             if args.attention:
                 y_dis += [args.loss_coe[2]*loss_att.cpu(),]
-            if args.association:
-                y_dis += [args.loss_coe[3]*loss_asso.cpu(),]
+            # update = 'append' if iteration
             viz.line(
                 X=torch.ones((1., y_dim)) * iteration,
                 Y=torch.FloatTensor(y_dis).unsqueeze(0),
                 win=lot,
                 update='append',
+                opts=dict(
+                    xlabel='Iteration',
+                    ylabel='Loss',
+                    title=args.save_folder.split('/')[-1],
+                    legend=legend,)
             )
 
         if iteration % args.save_interval == 0:

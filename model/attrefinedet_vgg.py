@@ -4,11 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from layers import *
-from .networks import vgg, vgg_base
+from .networks import vgg, vgg_base, ConvAttention
 
 class RefineSSD(nn.Module):
 
-    def __init__(self, size, num_classes, use_refine=False, phase='train', dropout=1.0):
+    def __init__(self, size, num_classes, use_refine=False, phase='train', dropout=1.0, residual=False, channel=False):
         super(RefineSSD, self).__init__()
         self.num_classes = num_classes
         self.size = size
@@ -20,6 +20,15 @@ class RefineSSD(nn.Module):
         else:
             self.dropout = False
         self.box_num = 3
+        if channel:
+            if size==320:
+                from data.config import VOC_320
+                spatial_size = VOC_320['feature_maps']
+            elif size==512:
+                from data.config import VOC_512_RefineDet
+                spatial_size = VOC_512_RefineDet['feature_maps']
+            else:
+                spatial_size = [None] * 4
 
         # SSD network
         self.backbone = nn.ModuleList(vgg(vgg_base['320'], 3, pool5_ds=True))
@@ -39,11 +48,8 @@ class RefineSSD(nn.Module):
                                           nn.Conv2d(1024,self.box_num *4, kernel_size=3, stride=1, padding=1),
                                           nn.Conv2d(512, self.box_num *4, kernel_size=3, stride=1, padding=1),
                                           ])
-            self.arm_conf = nn.ModuleList([nn.Conv2d(512, self.box_num *self.num_classes, kernel_size=3, stride=1, padding=1),
-                                           nn.Conv2d(512, self.box_num *self.num_classes, kernel_size=3, stride=1, padding=1),
-                                           nn.Conv2d(1024,self.box_num *self.num_classes, kernel_size=3, stride=1, padding=1),
-                                           nn.Conv2d(512, self.box_num *self.num_classes, kernel_size=3, stride=1, padding=1),
-                                           ])
+            self.arm_att = nn.ModuleList([ConvAttention(512, residual=residual, channel=channel, spatial_size=spatial_size[0]), ConvAttention(512, residual=residual, channel=channel, spatial_size=spatial_size[1]),
+                                          ConvAttention(1024, residual=residual, channel=channel,spatial_size=spatial_size[2]), ConvAttention(512, residual=residual, channel=channel, spatial_size=spatial_size[3])])
         self.odm_loc = nn.ModuleList([nn.Conv2d(256, self.box_num *4, kernel_size=3, stride=1, padding=1),
                                       nn.Conv2d(256, self.box_num *4, kernel_size=3, stride=1, padding=1),
                                       nn.Conv2d(256, self.box_num *4, kernel_size=3, stride=1, padding=1),
@@ -81,7 +87,7 @@ class RefineSSD(nn.Module):
 
         arm_sources = list()
         arm_loc_list = list()
-        arm_conf_list = list()
+        arm_att_list = list()
         obm_loc_list = list()
         obm_conf_list = list()
         obm_sources = list()
@@ -92,8 +98,9 @@ class RefineSSD(nn.Module):
         if self.dropout:
             x = F.dropout(x, self.dropout_p, training=self.istraining)
         norm_s = self.L2Norm_4_3(x)
-
-        arm_sources.append(norm_s)
+        x, att_map = self.arm_att[0](norm_s)
+        arm_sources.append(x)
+        arm_att_list.append(att_map)
 
         # apply vgg up to conv5_3
         for k in range(23, 30):
@@ -101,26 +108,31 @@ class RefineSSD(nn.Module):
         if self.dropout:
             x = F.dropout(x, self.dropout_p, training=self.istraining)
         norm_s = self.L2Norm_5_3(x)
-        arm_sources.append(norm_s)
+        x, att_map = self.arm_att[1](norm_s)
+        arm_sources.append(x)
+        arm_att_list.append(att_map)
 
         # apply vgg up to fc7
         for k in range(30, len(self.backbone)):
             x = self.backbone[k](x)
         if self.dropout:
             x = F.dropout(x, self.dropout_p, training=self.istraining)
+        x, att_map = self.arm_att[2](x)
         arm_sources.append(x)
+        arm_att_list.append(att_map)
+
         # conv6_2
         x = self.extras(x)
         if self.dropout:
             x = F.dropout(x, self.dropout_p, training=self.istraining)
+        x, att_map = self.arm_att[3](x)
         arm_sources.append(x)
+        arm_att_list.append(att_map)
         # apply multibox head to arm branch
         if self.use_refine:
-            for (a, l, c) in zip(arm_sources, self.arm_loc, self.arm_conf):
+            for (a, l) in zip(arm_sources, self.arm_loc):
                 arm_loc_list.append(l(a).permute(0, 2, 3, 1).contiguous())
-                arm_conf_list.append(c(a).permute(0, 2, 3, 1).contiguous())
             arm_loc = torch.cat([o.view(o.size(0), -1) for o in arm_loc_list], 1)
-            arm_conf = torch.cat([o.view(o.size(0), -1) for o in arm_conf_list], 1)
         x = self.last_layer_trans(x)
         if self.dropout:
             x = F.dropout(x, self.dropout_p, training=self.istraining)
@@ -150,7 +162,7 @@ class RefineSSD(nn.Module):
             if self.use_refine:
                 output = (
                     arm_loc.view(arm_loc.size(0), -1, 4),  # loc preds
-                    self.softmax(arm_conf.view(-1, 2)),  # conf preds
+                    tuple(arm_att_list),  # conf preds
                     obm_loc.view(obm_loc.size(0), -1, 4),  # loc preds
                     self.softmax(obm_conf.view(-1, self.num_classes)),  # conf preds
                 )
@@ -163,7 +175,7 @@ class RefineSSD(nn.Module):
             if self.use_refine:
                 output = (
                     arm_loc.view(arm_loc.size(0), -1, 4),  # loc preds
-                    arm_conf.view(arm_conf.size(0), -1, self.num_classes),  # conf preds
+                    tuple(arm_att_list),  # conf preds
                     obm_loc.view(obm_loc.size(0), -1, 4),  # loc preds
                     obm_conf.view(obm_conf.size(0), -1, self.num_classes),  # conf preds
                 )
@@ -184,9 +196,9 @@ class RefineSSD(nn.Module):
             print('Sorry only .pth and .pkl files supported.')
 
 
-def build_net(phase, size=320, num_classes=21, use_refine=False, dropout=1.0):
+def build_net(phase, size=320, num_classes=21, use_refine=False, dropout=1.0, residual=False, channel=False):
     if size not in [320, 512]:
         print("Error: Sorry only RefDetSSD320/512 is supported currently!")
         return
 
-    return RefineSSD(size, num_classes=num_classes, use_refine=use_refine, phase=phase, dropout=dropout)
+    return RefineSSD(size, num_classes=num_classes, use_refine=use_refine, phase=phase, dropout=dropout, residual=residual, channel=channel)

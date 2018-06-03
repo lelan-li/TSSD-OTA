@@ -90,7 +90,7 @@ elif args.dataset_name == 'UW':
     labelmap = UW_CLASSES
 
 prior = 'VOC_'+ str(args.ssd_dim)
-if args.backbone[:9] == '_RefineDet' and args.ssd_dim == 512:
+if args.backbone[:9] == 'RefineDet' and args.ssd_dim == 512:
     prior += '_RefineDet'
 cfg = mb_cfg[prior]
 

@@ -177,8 +177,8 @@ class VOCDetection(data.Dataset):
             (default: 'VOC2007')
     """
 
-    def __init__(self, root, image_sets, transform=None, target_transform=None,
-                 dataset_name='VOC0712', set_file_name='train', seq_len=8, skip=False):
+    def __init__(self, root, image_sets, transform, target_transform,
+                 dataset_name='VOC0712', set_file_name='train', seq_len=8, skip=False, use_mask=False):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
@@ -188,6 +188,7 @@ class VOCDetection(data.Dataset):
         self.video_size = list()
         self.seq_len = seq_len
         self.skip = skip
+        self.use_mask = use_mask
         if skip:
             print('Random collect data with a random skip')
         else:
@@ -226,12 +227,15 @@ class VOCDetection(data.Dataset):
         else:
             loop_none_gt = True
             while loop_none_gt:
-                im, gt, h, w, mask = self.pull_item(index)
-                if len(gt) > 0:
+                out = self.pull_item(index) # im, gt, h, w, mask
+                if len(out[1]) > 0:
                     loop_none_gt = False
                 else:
                     index = index+1
-            return im, gt, mask
+                ret = list(out[:2])
+                if self.use_mask:
+                    ret.append(out[4])
+            return tuple(ret), self.use_mask
 
     def __len__(self):
         return len(self.ids)
@@ -335,17 +339,20 @@ class VOCDetection(data.Dataset):
         img_id = self.ids[index]
         target = ET.parse(self._annopath % img_id).getroot()
         img = cv2.imread(self._imgpath % img_id)
-        height, width, channels = img.shape
-        maskroi = np.zeros([img.shape[0], img.shape[1]])
+        height, width, _ = img.shape
 
-        if self.target_transform is not None:
-            target = self.target_transform(target, width, height, img_id)
-            if len(target) == 0:
-                # target = np.array(target)
-                # print(img_id)
-                img,_,_ = self.transform(img)
-                img = img[:, :, (2, 1, 0)]
-                return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
+        # if self.target_transform is not None:
+        target = self.target_transform(target, width, height, img_id)
+        if len(target) == 0:
+            # target = np.array(target)
+            # print(img_id)
+            img,_,_ = self.transform(img)
+            img = img[:, :, (2, 1, 0)]
+            out = [torch.from_numpy(img).permute(2, 0, 1), target, height, width,]
+            if self.use_mask:
+                maskroi = np.zeros([img.shape[0], img.shape[1]])
+                out += [torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0)]
+            return tuple(out)
             # box = target[0]
             # x_min, y_min, x_max, y_max, _ = box
             # print(x_min, y_min, x_max, y_max)
@@ -353,13 +360,15 @@ class VOCDetection(data.Dataset):
             # cv2.imshow('test', cv2.resize(cv2.resize(img,(300,300)), (700,700)))
             # cv2.waitKey(1)
 
-        if self.transform is not None:
-            target = np.array(target)
-            img, boxes, labels = self.transform(img, target[:, :4], target[:, 4])
-            # to rgb
-            img = img[:, :, (2, 1, 0)]
-            # img = img.transpose(2, 0, 1)
-            target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+        # if self.transform is not None:
+        target = np.array(target)
+        img, boxes, labels = self.transform(img, target[:, :4], target[:, 4])
+        # to rgb
+        img = img[:, :, (2, 1, 0)]
+        # img = img.transpose(2, 0, 1)
+        target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+        out = [torch.from_numpy(img).permute(2, 0, 1), target, height, width,]
+        if self.use_mask:
             maskroi = np.zeros([img.shape[0], img.shape[1]])
             for box in list(boxes):
                 box[0] *= img.shape[1]
@@ -370,8 +379,9 @@ class VOCDetection(data.Dataset):
                 maskroi = cv2.fillPoly(maskroi, [pts], 1)
                 # cv2.imshow('mask',cv2.resize(maskori, (700,700)))
             # cv2.waitKey(0)
+            out += [torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0),]
 
-        return torch.from_numpy(img).permute(2, 0, 1), target, height, width, torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0)
+        return tuple(out)
         # return torch.from_numpy(img), target, height, width
 
     def pull_img_id(self, index):
@@ -422,7 +432,7 @@ class VOCDetection(data.Dataset):
         return torch.Tensor(self.pull_image(index)).unsqueeze_(0)
 
 
-def detection_collate(batch):
+def detection_collate(data):
     """Custom collate fn for dealing with batches of images that have a different
     number of associated object annotations (bounding boxes).
 
@@ -434,14 +444,21 @@ def detection_collate(batch):
             1) (tensor) batch of images stacked on their 0 dim
             2) (list of tensors) annotations for a given image are stacked on 0 dim
     """
+    batch = [o[0] for o in data]
+    use_mask = data[0][1]
     targets = []
     imgs = []
-    masks = []
+    if use_mask:
+        masks = []
     for sample in batch:
         imgs.append(sample[0])
         targets.append(torch.FloatTensor(sample[1]))
-        masks.append(sample[2])
-    return torch.stack(imgs, 0), targets, torch.stack(masks, 0)
+        if use_mask:
+            masks.append(sample[2])
+    batch_out = [torch.stack(imgs, 0), targets,]
+    if use_mask:
+        batch_out.append(torch.stack(masks, 0))
+    return tuple(batch_out)
 
 def seq_detection_collate(batch):
     """Custom collate fn for dealing with batches of images that have a different
