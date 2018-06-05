@@ -27,8 +27,8 @@ class RefineSSD(nn.Module):
             elif size==512:
                 from data.config import VOC_512_RefineDet
                 spatial_size = VOC_512_RefineDet['feature_maps']
-            else:
-                spatial_size = [None] * 4
+        else:
+            spatial_size = [None] * 4
 
         # SSD network
         self.backbone = nn.ModuleList(vgg(vgg_base['320'], 3, pool5_ds=True))

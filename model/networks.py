@@ -151,7 +151,7 @@ class ConvAttention(nn.Module):
         super(ConvAttention, self).__init__()
         self.residual = residual
         self.channel = channel
-        self.spatial_att = nn.Sequential(
+        self.attention = nn.Sequential(
             nn.Conv2d(inchannel, int(inchannel/4), kernel_size=1, stride=1, padding=0, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(int(inchannel/4), int(inchannel/4), kernel_size=3, stride=1, padding=1, bias=False),
@@ -175,7 +175,7 @@ class ConvAttention(nn.Module):
             )
 
     def forward(self, feats):
-        s = self.spatial_att(feats)
+        s = self.attention(feats)
         x = s * feats
         if self.residual:
             x = x + feats

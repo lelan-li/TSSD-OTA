@@ -8,7 +8,7 @@ import torch.utils.data as data
 from data import AnnotationTransform, BaseTransform, VOCDetection, MOTDetection, detection_collate, seq_detection_collate, mb_cfg, dataset_training_cfg
 
 from utils.augmentations import SSDAugmentation
-from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss, RefineMultiBoxLoss
+from layers.modules import MultiBoxLoss, AttentionLoss, RefineMultiBoxLoss
 from layers.functions import PriorBox
 import numpy as np
 import time
@@ -21,7 +21,7 @@ def print_log(args):
     logging.info('model_name: '+ args.model_name)
     logging.info('ssd_dim: '+ str(args.ssd_dim))
     logging.info('Backbone: '+ args.backbone)
-    if args.backbone[:9] == 'RefineDet':
+    if 'RefineDet' in args.backbone:
         logging.info('Refine: ' + str(args.refine))
         logging.info('Dropout: ' + str(args.drop))
     logging.info('attention: '+ str(args.attention))
@@ -125,7 +125,7 @@ if args.dataset_name in ['MOT15', 'seqMOT15']:
     cfg = mb_cfg[prior]
 else:
     prior = 'VOC_'+ str(args.ssd_dim)
-    if args.ssd_dim==512 and args.backbone[:9] == 'RefineDet':
+    if args.ssd_dim==512 and 'RefineDet' in args.backbone:
         prior += '_RefineDet'
     cfg = mb_cfg[prior]
 
@@ -152,14 +152,14 @@ if args.visdom:
 if args.backbone == 'RFB_VGG':
     from model.rfbnet_vgg import build_net
     ssd_net = build_net('train', ssd_dim, num_classes)
-elif args.backbone[:9] == 'RefineDet':
+elif 'RefineDet' in args.backbone:
     if args.attention:
         from model.attrefinedet_vgg import build_net
         ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine, dropout=args.drop, residual=args.res_attention, channel=args.channel_attention)
     else:
         from model.refinedet_vgg import build_net
-        ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine, dropout=args.drop)
-elif args.backbone[:6] == 'ResNet':
+        ssd_net = build_net('train', size=ssd_dim, num_classes=num_classes, use_refine=args.refine)
+elif 'ResNet' in args.backbone:
     from model.ssd_resnet import build_net
     ssd_net = build_net('train', backbone=args.backbone, size=ssd_dim, num_classes=num_classes, prior=prior, pm=args.pm)
 else:
@@ -238,9 +238,9 @@ else:
     optimizer = optim.SGD(net.parameters(),
                           lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 # criterion
-if args.backbone[:9] == 'RefineDet' and args.refine:
+if 'RefineDet' in args.backbone and args.refine:
     use_refine = True
-    arm_criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device, only_loc=args.attention)
+    arm_criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, device=device, only_loc=True)
     criterion = RefineMultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False, object_score = 0.01, device=device)
 else:
     use_refine = False
@@ -322,14 +322,15 @@ def train():
         # backward
         optimizer.zero_grad()
         if use_refine:
+            loss_arm_l = arm_criterion(out[0], priors, targets)
             loss_l, loss_c = criterion(out[2:], priors, targets, arm_data=out[:2])
+            # if args.attention:
+            loss += args.loss_coe[0] * loss_arm_l
             if args.attention:
-                loss_arm_l = arm_criterion(out[0], priors, targets)
-                loss += args.loss_coe[0] * loss_arm_l
                 att_maps = out[1]
-            else:
-                loss_arm_l, loss_arm_c = arm_criterion(out[:2], priors, targets)
-                loss += args.loss_coe[0] * loss_arm_l +  args.loss_coe[1] * loss_arm_c
+            # else:
+            #     loss_arm_l, loss_arm_c = arm_criterion(out[:2], priors, targets)
+            #     loss += args.loss_coe[0] * loss_arm_l #+  args.loss_coe[1] * loss_arm_c
         else:
             loss_l, loss_c = criterion(out, priors, targets)
         loss += args.loss_coe[0] * loss_l + args.loss_coe[1] * loss_c

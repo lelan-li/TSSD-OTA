@@ -52,6 +52,13 @@ class Detect(Function):
         num = loc_data.size(0)  # batch size
         num_priors = prior_data.size(0)
         self.output.zero_()
+        # if arm_data:
+        #     arm_loc, arm_conf = arm_data
+        #     arm_loc_data = arm_loc.data
+        #     arm_conf_data = arm_conf.data
+        #     arm_object_conf = arm_conf_data[:, 1:]
+        #     no_object_index = arm_object_conf <= self.object_score
+        #     conf_data[no_object_index.expand_as(conf_data)] = 0
         if num == 1:
             # size batch x num_classes x num_priors
             conf_preds = conf_data.t().contiguous().unsqueeze(0)
@@ -61,7 +68,7 @@ class Detect(Function):
             self.output = self.output.expand(num, self.num_classes, self.top_k, 5)
         # Decode predictions into bboxes.
         for i in range(num):
-            if arm_loc_data:
+            if arm_loc_data is not None:
                 default = decode(arm_loc_data[i], prior_data, self.variance)
                 default = center_size(default)
             else:
@@ -70,7 +77,6 @@ class Detect(Function):
             # For each class, perform nms
             conf_scores = conf_preds[i].clone()
             for cl in range(1, self.num_classes):
-
                 c_mask = conf_scores[cl].gt(self.conf_thresh)
                 # a = c_mask.sum()
                 scores = conf_scores[cl][c_mask]

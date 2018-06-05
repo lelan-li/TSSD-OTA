@@ -148,7 +148,7 @@ def refine_match(threshold, truths, priors, variances, labels, loc_t, conf_t, id
     for j in range(best_prior_idx.size(0)):
         best_truth_idx[best_prior_idx[j]] = j
     matches = truths[best_truth_idx]          # Shape: [num_priors,4]
-    conf = labels[best_truth_idx]          # Shape: [num_priors]
+    conf = labels[best_truth_idx] + 1         # Shape: [num_priors]
     conf[best_truth_overlap < threshold] = 0  # label as background
     loc = encode(matches, center_size(decode_arm), variances)
     loc_t[idx] = loc    # [num_priors,4] encoded offsets to learn
@@ -199,24 +199,6 @@ def decode(loc, priors, variances):
         priors[:, 2:] * torch.exp(loc[:, 2:] * variances[1])), 1)
     boxes[:, :2] -= boxes[:, 2:] / 2
     boxes[:, 2:] += boxes[:, :2]
-    return boxes
-
-def half_decode(loc, priors, variances):
-    """Decode locations from predictions using priors to undo
-    the encoding we did for offset regression at train time.
-    Args:
-        loc (tensor): location predictions for loc layers,
-            Shape: [num_priors,4]
-        priors (tensor): Prior boxes in center-offset form.
-            Shape: [num_priors,4].
-        variances: (list[float]) Variances of priorboxes
-    Return:
-        decoded bounding box predictions ([center_x, center_y, w, h])
-    """
-
-    boxes = torch.cat((
-        priors[:, :2] + loc[:, :2] * variances[0] * priors[:, 2:],
-        priors[:, 2:] * torch.exp(loc[:, 2:] * variances[1])), 1)
     return boxes
 
 def log_sum_exp(x):

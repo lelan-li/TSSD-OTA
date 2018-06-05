@@ -16,6 +16,7 @@ VIDroot = viddir
 MOT17Detroot = mot17detdir
 MOT15root = mot15dir
 UWroot = uwdir
+COCOroot = os.path.join(home,"data/MSCOCO2017/")
 
 # default batch size
 BATCHES = 32

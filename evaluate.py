@@ -43,6 +43,8 @@ parser.add_argument('--dataset_name', default='VID2017', help='Which dataset')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
 parser.add_argument('--backbone', default='VGG16', type=str, help='Backbone')
 parser.add_argument('--refine', default=False, type=str2bool, help='refine symbol for RefineDet')
+parser.add_argument('--res_attention', default=False, type=str2bool, help='add attention module')
+parser.add_argument('--channel_attention', default=True, type=str2bool, help='add attention module')
 parser.add_argument('--pm', default=0.0, type=float, help='use predection model or not, the float denotes the channel increment')
 parser.add_argument('--set_file_name', default='test', type=str,help='File path to save results')
 parser.add_argument('--iteration', default='20000', type=str,help='File path to save results')
@@ -90,7 +92,7 @@ elif args.dataset_name == 'UW':
     labelmap = UW_CLASSES
 
 prior = 'VOC_'+ str(args.ssd_dim)
-if args.backbone[:9] == 'RefineDet' and args.ssd_dim == 512:
+if 'RefineDet' in args.backbone and args.ssd_dim == 512:
     prior += '_RefineDet'
 cfg = mb_cfg[prior]
 
@@ -461,8 +463,12 @@ def test_net(save_folder, net, dataset, transform, top_k, detector, priors,
             x = im.unsqueeze(0).to(device)
             if tssd == 'ssd':
                 _t['im_detect'].tic()
-                loc, conf = net(x)
-                detections = detector.forward(loc, conf, priors)
+                if 'RefineDet' in args.backbone and args.refine:
+                    arm_loc,_, loc, conf = net(x)
+                else:
+                    loc, conf = net(x)
+                    arm_loc = None
+                detections = detector.forward(loc, conf, priors, arm_loc_data=arm_loc)
                 detect_time = _t['im_detect'].toc(average=False)
             else:
                 _t['im_detect'].tic()
@@ -522,10 +528,15 @@ if __name__ == '__main__':
         if args.backbone in ['RFB_VGG']:
             from model.rfbnet_vgg import build_net
             net = build_net('test', ssd_dim, num_classes)
-        elif args.backbone in ['RefineDet_VGG']:
-            from model.refinedet_vgg import build_net
-            net = build_net('test', size=ssd_dim, num_classes=num_classes, use_refine=args.refine)
-        elif args.backbone[:6] == 'ResNet':
+        elif 'RefineDet' in args.backbone:
+            if args.attention:
+                from model.attrefinedet_vgg import build_net
+                net = build_net('test', size=ssd_dim, num_classes=num_classes, use_refine=args.refine,
+                                    residual=args.res_attention, channel=args.channel_attention)
+            else:
+                from model.refinedet_vgg import build_net
+                net = build_net('test', size=ssd_dim, num_classes=num_classes, use_refine=args.refine)
+        elif 'ResNet' in args.backbone:
             from model.ssd_resnet import build_net
             net = build_net('test', backbone=args.backbone, prior=prior,size=ssd_dim, num_classes=num_classes, pm=args.pm)
         else:

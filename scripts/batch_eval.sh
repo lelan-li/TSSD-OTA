@@ -4,29 +4,32 @@ nms_thresh=0.45
 top_k=200
 type='ssd_voc'
 #for iter in {55000,60000,65000,70000,75000,80000,85000,90000,95000,100000}
-for iter in {100000,}
+for iter in {10000,}
+#for iter in {5000,10000,15000,20000,25000,30000,35000,40000,45000,500000}
 do
     if [ $type = 'ssd_voc' ]
     then
         python ../evaluate.py \
-        --model_dir '../weights040/VOC/ssd512RefineFalse_VOCb32' \
+        --model_dir '../weights040/VOC/ssd320RefineTrueLoc_VOCb32' \
         --model_name ssd \
-        --ssd_dim 512 \
+        --ssd_dim 320 \
         --iteration $iter \
         --save_folder ../eval \
         --confidence_threshold $conf_thresh \
         --nms_threshold $nms_thresh \
         --top_k $top_k \
         --backbone 'RefineDet_VGG' \
-        --refine 'no' \
+        --refine 'yes' \
+        --attention 'no' \
+        --res_attention 'no' \
+        --channel_attention 'no' \
         --pm 0.0 \
         --set_file_name 'test' \
         --dataset_name 'VOC0712' \
         --tssd 'ssd' \
         --gpu_id '3' \
         --detection 'yes' \
-        --cuda 'yes' \
-        --attention 'no'
+        --cuda 'yes'
     elif [ $type = 'ssd_refine' ]
     then
         python ../evaluate.py \
