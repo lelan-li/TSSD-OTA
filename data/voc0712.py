@@ -14,8 +14,11 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 from PIL import Image, ImageDraw, ImageFont
 import cv2
+import pickle
 import numpy as np
 import random
+from .voc_eval import voc_eval
+
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
 else:
@@ -177,8 +180,8 @@ class VOCDetection(data.Dataset):
             (default: 'VOC2007')
     """
 
-    def __init__(self, root, image_sets, transform=None, target_transform=None,
-                 dataset_name='VOC0712', set_file_name='train', seq_len=8, skip=False):
+    def __init__(self, root, image_sets, transform, target_transform,
+                 dataset_name='VOC0712', set_file_name='train', seq_len=8, skip=False, use_mask=False):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
@@ -188,6 +191,7 @@ class VOCDetection(data.Dataset):
         self.video_size = list()
         self.seq_len = seq_len
         self.skip = skip
+        self.use_mask = use_mask
         if skip:
             print('Random collect data with a random skip')
         else:
@@ -226,12 +230,15 @@ class VOCDetection(data.Dataset):
         else:
             loop_none_gt = True
             while loop_none_gt:
-                im, gt, h, w, mask = self.pull_item(index)
-                if len(gt) > 0:
+                out = self.pull_item(index) # im, gt, h, w, mask
+                if len(out[1]) > 0:
                     loop_none_gt = False
                 else:
                     index = index+1
-            return im, gt, mask
+                ret = list(out[:2])
+                if self.use_mask:
+                    ret.append(out[4])
+            return tuple(ret), self.use_mask
 
     def __len__(self):
         return len(self.ids)
@@ -335,17 +342,20 @@ class VOCDetection(data.Dataset):
         img_id = self.ids[index]
         target = ET.parse(self._annopath % img_id).getroot()
         img = cv2.imread(self._imgpath % img_id)
-        height, width, channels = img.shape
-        maskroi = np.zeros([img.shape[0], img.shape[1]])
+        height, width, _ = img.shape
 
-        if self.target_transform is not None:
-            target = self.target_transform(target, width, height, img_id)
-            if len(target) == 0:
-                # target = np.array(target)
-                # print(img_id)
-                img,_,_ = self.transform(img)
-                img = img[:, :, (2, 1, 0)]
-                return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
+        # if self.target_transform is not None:
+        target = self.target_transform(target, width, height, img_id)
+        if len(target) == 0:
+            # target = np.array(target)
+            # print(img_id)
+            img,_,_ = self.transform(img)
+            img = img[:, :, (2, 1, 0)]
+            out = [torch.from_numpy(img).permute(2, 0, 1), target, height, width,]
+            if self.use_mask:
+                maskroi = np.zeros([img.shape[0], img.shape[1]])
+                out += [torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0)]
+            return tuple(out)
             # box = target[0]
             # x_min, y_min, x_max, y_max, _ = box
             # print(x_min, y_min, x_max, y_max)
@@ -353,13 +363,15 @@ class VOCDetection(data.Dataset):
             # cv2.imshow('test', cv2.resize(cv2.resize(img,(300,300)), (700,700)))
             # cv2.waitKey(1)
 
-        if self.transform is not None:
-            target = np.array(target)
-            img, boxes, labels = self.transform(img, target[:, :4], target[:, 4])
-            # to rgb
-            img = img[:, :, (2, 1, 0)]
-            # img = img.transpose(2, 0, 1)
-            target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+        # if self.transform is not None:
+        target = np.array(target)
+        img, boxes, labels = self.transform(img, target[:, :4], target[:, 4])
+        # to rgb
+        img = img[:, :, (2, 1, 0)]
+        # img = img.transpose(2, 0, 1)
+        target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+        out = [torch.from_numpy(img).permute(2, 0, 1), target, height, width,]
+        if self.use_mask:
             maskroi = np.zeros([img.shape[0], img.shape[1]])
             for box in list(boxes):
                 box[0] *= img.shape[1]
@@ -370,8 +382,9 @@ class VOCDetection(data.Dataset):
                 maskroi = cv2.fillPoly(maskroi, [pts], 1)
                 # cv2.imshow('mask',cv2.resize(maskori, (700,700)))
             # cv2.waitKey(0)
+            out += [torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0),]
 
-        return torch.from_numpy(img).permute(2, 0, 1), target, height, width, torch.from_numpy(maskroi).type(torch.FloatTensor).unsqueeze(0)
+        return tuple(out)
         # return torch.from_numpy(img), target, height, width
 
     def pull_img_id(self, index):
@@ -421,8 +434,96 @@ class VOCDetection(data.Dataset):
         '''
         return torch.Tensor(self.pull_image(index)).unsqueeze_(0)
 
+    def evaluate_detections(self, all_boxes, output_dir=None):
+        """
+        all_boxes is a list of length number-of-classes.
+        Each list element is a list of length number-of-images.
+        Each of those list elements is either an empty list []
+        or a numpy array of detection.
+        all_boxes[class][image] = [] or np.array of shape #dets x 5
+        """
+        self._write_voc_results_file(all_boxes)
+        aps, map = self._do_python_eval(output_dir)
+        return aps, map
 
-def detection_collate(batch):
+    def _get_voc_results_file_template(self):
+        filename = 'comp4_det_test' + '_{:s}.txt'
+        filedir = os.path.join(
+            self.root, 'results', 'VOC' + self._year, 'Main')
+        if not os.path.exists(filedir):
+            os.makedirs(filedir)
+        path = os.path.join(filedir, filename)
+        return path
+
+    def _write_voc_results_file(self, all_boxes):
+        for cls_ind, cls in enumerate(VOC_CLASSES):
+            cls_ind = cls_ind
+            if cls == '__background__':
+                continue
+            print('Writing {} VOC results file'.format(cls))
+            filename = self._get_voc_results_file_template().format(cls)
+            with open(filename, 'wt') as f:
+                for im_ind, index in enumerate(self.ids):
+                    index = index[1]
+                    dets = all_boxes[cls_ind][im_ind]
+                    if dets == []:
+                        continue
+                    for k in range(dets.shape[0]):
+                        f.write('{:s} {:.3f} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
+                                format(index, dets[k, -1],
+                                       dets[k, 0] + 1, dets[k, 1] + 1,
+                                       dets[k, 2] + 1, dets[k, 3] + 1))
+
+    def _do_python_eval(self, output_dir='output'):
+        rootpath = os.path.join(self.root, 'VOC' + self._year)
+        name = self.image_set[0][1]
+        annopath = os.path.join(
+            rootpath,
+            'Annotations',
+            '{:s}.xml')
+        imagesetfile = os.path.join(
+            rootpath,
+            'ImageSets',
+            'Main',
+            name + '.txt')
+        cachedir = os.path.join(self.root, 'annotations_cache')
+        aps = []
+        # The PASCAL VOC metric changed in 2010
+        use_07_metric = True if int(self._year) < 2010 else False
+        print('VOC07 metric? ' + ('Yes' if use_07_metric else 'No'))
+        if output_dir is not None and not os.path.isdir(output_dir):
+            os.mkdir(output_dir)
+        for i, cls in enumerate(VOC_CLASSES):
+
+            if cls == '__background__':
+                continue
+
+            filename = self._get_voc_results_file_template().format(cls)
+            rec, prec, ap = voc_eval(
+                filename, annopath, imagesetfile, cls, cachedir, ovthresh=0.5,
+                use_07_metric=use_07_metric)
+            aps += [ap]
+            print('AP for {} = {:.4f}'.format(cls, ap))
+            if output_dir is not None:
+                with open(os.path.join(output_dir, cls + '_pr.pkl'), 'wb') as f:
+                    pickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
+        print('Mean AP = {:.4f}'.format(np.mean(aps)))
+        print('~~~~~~~~')
+        print('Results:')
+        for ap in aps:
+            print('{:.3f}'.format(ap))
+        print('{:.3f}'.format(np.mean(aps)))
+        print('~~~~~~~~')
+        print('')
+        print('--------------------------------------------------------------')
+        print('Results computed with the **unofficial** Python eval code.')
+        print('Results should be very close to the official MATLAB eval code.')
+        print('Recompute with `./tools/reval.py --matlab ...` for your paper.')
+        print('-- Thanks, The Management')
+        print('--------------------------------------------------------------')
+        return aps, np.mean(aps)
+
+def detection_collate(data):
     """Custom collate fn for dealing with batches of images that have a different
     number of associated object annotations (bounding boxes).
 
@@ -434,14 +535,21 @@ def detection_collate(batch):
             1) (tensor) batch of images stacked on their 0 dim
             2) (list of tensors) annotations for a given image are stacked on 0 dim
     """
+    batch = [o[0] for o in data]
+    use_mask = data[0][1]
     targets = []
     imgs = []
-    masks = []
+    if use_mask:
+        masks = []
     for sample in batch:
         imgs.append(sample[0])
         targets.append(torch.FloatTensor(sample[1]))
-        masks.append(sample[2])
-    return torch.stack(imgs, 0), targets, torch.stack(masks, 0)
+        if use_mask:
+            masks.append(sample[2])
+    batch_out = [torch.stack(imgs, 0), targets,]
+    if use_mask:
+        batch_out.append(torch.stack(masks, 0))
+    return tuple(batch_out)
 
 def seq_detection_collate(batch):
     """Custom collate fn for dealing with batches of images that have a different

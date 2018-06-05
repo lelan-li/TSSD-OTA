@@ -3,12 +3,14 @@ conf_thresh=0.01
 nms_thresh=0.45
 top_k=200
 type='ssd_voc'
-for iter in {5000,10000,15000,20000,25000,30000,35000,40000,45000,50000}
+#for iter in {55000,60000,65000,70000,75000,80000,85000,90000,95000,100000}
+for iter in {10000,}
+#for iter in {5000,10000,15000,20000,25000,30000,35000,40000,45000,500000}
 do
     if [ $type = 'ssd_voc' ]
     then
-        python ../eval.py \
-        --model_dir '../weights040/VOC/ssd320RefineFalse_VOCb32' \
+        python ../evaluate.py \
+        --model_dir '../weights040/VOC/ssd320RefineTrueLoc_VOCb32' \
         --model_name ssd \
         --ssd_dim 320 \
         --iteration $iter \
@@ -17,18 +19,20 @@ do
         --nms_threshold $nms_thresh \
         --top_k $top_k \
         --backbone 'RefineDet_VGG' \
-        --refine 'no' \
+        --refine 'yes' \
+        --attention 'no' \
+        --res_attention 'no' \
+        --channel_attention 'no' \
         --pm 0.0 \
         --set_file_name 'test' \
         --dataset_name 'VOC0712' \
         --tssd 'ssd' \
-        --gpu_id '0' \
+        --gpu_id '3' \
         --detection 'yes' \
-        --cuda 'yes' \
-        --attention 'no'
+        --cuda 'yes'
     elif [ $type = 'ssd_refine' ]
     then
-        python ../eval.py \
+        python ../evaluate.py \
         --model_dir '../weights040/UW/ssd320RefineFalseDrop_UWb32' \
         --model_name ssd \
         --ssd_dim 320 \
@@ -48,7 +52,7 @@ do
         --attention 'no'
     elif [ $type = 'ssd_resnet' ]
     then
-        python ../eval.py \
+        python ../evaluate.py \
         --model_dir '../weights040/UW/ssd512res50_UW' \
         --model_name ssd \
         --ssd_dim 512 \
@@ -69,7 +73,7 @@ do
         --attention 'no'
     elif [ $type = 'tblstm_vid' ]
     then
-        python ../eval.py \
+        python ../evaluate.py \
         --model_dir '../weights040/VID/tssd300_VID2017_SALd15_816' \
         --iteration 25000 \
         --save_folder '../eval' \
@@ -88,7 +92,7 @@ do
         --tub_generate_score 0.5
     elif [ $type = 'tblstm_uw' ]
     then
-        python ../eval.py \
+        python ../evaluate.py \
         --model_dir '../weights040/UW/tssd300_UW_SAL_816' \
         --iteration 6000 \
         --save_folder '../eval' \
