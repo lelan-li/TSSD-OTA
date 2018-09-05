@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from layers import *
 from data import v2, v3
-from layers import half_decode
 from data import v2 as cfg
 import os
 
@@ -330,7 +329,7 @@ class TSSD(nn.Module):
                 sources.append(s)
 
                 # apply vgg up to fc7
-                for k in range(23, len(self.vgg)):
+                for k in range(self.conv4_3_layer, len(self.vgg)):
                     x = self.vgg[k](x)
                 sources.append(x)
 
@@ -387,7 +386,7 @@ class TSSD(nn.Module):
             sources.append(s)
 
             # apply vgg up to fc7
-            for k in range(23, len(self.vgg)):
+            for k in range(self.conv4_3_layer, len(self.vgg)):
                 tx = self.vgg[k](tx)
             sources.append(tx)
 

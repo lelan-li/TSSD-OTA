@@ -329,9 +329,10 @@ class VOCDetection(data.Dataset):
             target = self.target_transform(target, width, height, img_id)
             if len(target) == 0:
                 # target = np.array(target)
-                img,_,_ = self.transform(img)
-                img = img[:, :, (2, 1, 0)]
                 return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
+                # img,_,_ = self.transform(img)
+                # img = img[:, :, (2, 1, 0)]
+                # return torch.from_numpy(img).permute(2, 0, 1), target, height, width, maskroi
             # box = target[0]
             # x_min, y_min, x_max, y_max, _ = box
             # print(x_min, y_min, x_max, y_max)
@@ -376,6 +377,17 @@ class VOCDetection(data.Dataset):
         '''
         img_id = self.ids[index]
         return cv2.imread(self._imgpath % img_id, cv2.IMREAD_COLOR)
+
+    def pull_transformed_image(self, index):
+        img_id = self.ids[index]
+        img = cv2.imread(self._imgpath % img_id)
+        height, width, _ = img.shape
+
+        # if self.transform is not None:
+        img, _, _ = self.transform(img)
+        # to rgb
+        img = img[:, :, (2, 1, 0)]
+        return torch.from_numpy(img).permute(2, 0, 1), height, width,
 
     def pull_anno(self, index):
         '''Returns the original annotation of image at index

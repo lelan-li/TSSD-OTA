@@ -11,10 +11,11 @@ from data import v2, v3, AnnotationTransform, BaseTransform, VOCDetection, MOTDe
 from utils.augmentations import SSDAugmentation, seqSSDAugmentation
 from layers.modules import MultiBoxLoss, seqMultiBoxLoss, AttentionLoss
 from ssd import build_ssd
+from ssd_resnet import build_net
 import numpy as np
 import time
 import logging
-
+import torch._utils
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -49,7 +50,7 @@ def print_log(args):
     logging.info('loss weights: '+ str(args.loss_coe))
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detector Training')
 parser.add_argument('--version', default='v2', help='conv11_2(v2) or pool6(v1) as last layer')
-parser.add_argument('--basenet', default='vgg16_reducedfc_512.pth', help='pretrained base model')
+parser.add_argument('--basenet', default='resnet18_reducedfc_512.pth', help='pretrained base model')
 parser.add_argument('--jaccard_threshold', default=0.5, type=float, help='Min Jaccard index for matching')
 parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str, help='Resume from checkpoint') #'./weights/tssd300_VID2017_b8s8_RSkipTBLstm_baseAugmDrop2Clip5_FixVggExtraPreLocConf/ssd300_seqVID2017_20000.pth'
@@ -68,7 +69,7 @@ parser.add_argument('--log_iters', default=True, type=bool, help='Print the loss
 parser.add_argument('--visdom', default=False, type=str2bool, help='Use visdom to for loss visualization')
 parser.add_argument('--send_images_to_visdom', type=str2bool, default=False, help='Sample a random image from each 10th batch, send it to visdom after augmentations step')
 parser.add_argument('--save_folder', default='./weights/test', help='Location to save checkpoint models')
-parser.add_argument('--dataset_name', default='MOT15', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
+parser.add_argument('--dataset_name', default='VIDDET', help='VOC0712/VIDDET/seqVID2017/MOT17Det/seqMOT17Det')
 parser.add_argument('--step_list', nargs='+', type=int, default=[30,50], help='step_list for learning rate')
 parser.add_argument('--save_interval', default=5000, type=int, help='frequency of saving checkpoint')
 parser.add_argument('--ssd_dim', default=300, type=int, help='ssd_dim 300 or 512')
@@ -178,8 +179,9 @@ if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn,
-                    refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))), identify=args.identify)
+# ssd_net = build_ssd('train', ssd_dim, num_classes, tssd=args.tssd, attention=args.attention, prior=prior, bn=args.bn,
+#                     refine=args.refine, single_batch=int(args.batch_size/len(args.gpu_ids.split(','))), identify=args.identify)
+ssd_net = build_net('train', backbone='ResNet18', prior='300', size=args.ssd_dim, num_classes=num_classes, pm=0., c7_channel=512, tssd=(True, False)[args.tssd=='ssd'], attention=args.attention)
 net = ssd_net
 
 if args.cuda:
@@ -223,28 +225,28 @@ elif args.resume_from_tssd != 'tssd':
     ssd_net.conf.load_state_dict(ssd_conf_weights)
     if args.attention:
         ssd_net.attention.load_state_dict(ssd_attention_weights)
-
-
 elif args.resume_from_ssd != 'ssd':
     from collections import OrderedDict
     print('training from pretrained vgg and extras, loading {}...'.format(args.resume_from_ssd))
     ssd_weights = torch.load(args.resume_from_ssd)
-    ssd_vgg_weights = OrderedDict()
+    ssd_backbone_weights = OrderedDict()
+    # ssd_vgg_weights = OrderedDict()
     ssd_extras_weights = OrderedDict()
     ssd_loc_weights = OrderedDict()
     ssd_conf_weights = OrderedDict()
     for key, weight in ssd_weights.items():
         key_split = key.split('.')
         subnet_name = key_split[0]
-        if subnet_name == 'vgg':
-            ssd_vgg_weights[key_split[1] + '.' + key_split[2]] = weight
+        if subnet_name == 'backbone':
+            ssd_backbone_weights[key[9:]] = weight
         elif subnet_name == 'extras':
-            ssd_extras_weights[key_split[1] + '.' + key_split[2]] = weight
+            ssd_extras_weights[key[7:]] = weight
         elif subnet_name == 'loc':
             ssd_loc_weights[key_split[1] + '.' + key_split[2]] = weight
         elif subnet_name == 'conf':
             ssd_conf_weights[key_split[1] + '.' + key_split[2]] = weight
-    ssd_net.vgg.load_state_dict(ssd_vgg_weights)
+    # ssd_net.vgg.load_state_dict(ssd_vgg_weights)
+    ssd_net.backbone.load_state_dict(ssd_backbone_weights)
     ssd_net.extras.load_state_dict(ssd_extras_weights)
     ssd_net.loc.load_state_dict(ssd_loc_weights)
     ssd_net.conf.load_state_dict(ssd_conf_weights)
@@ -252,17 +254,17 @@ elif args.resume_from_ssd != 'ssd':
 else:
     vgg_weights = torch.load(args.save_folder + '/../'+ args.basenet)# + '/../'
     print('Loading base network...')
-    ssd_net.vgg.load_state_dict(vgg_weights)
+    ssd_net.backbone.load_state_dict(vgg_weights)
 
 if args.freeze:
     if args.freeze == 1:
-        print('Freeze vgg, extras')
-        freeze_nets = [ssd_net.vgg, ssd_net.extras]
+        print('Freeze backbone, extras')
+        freeze_nets = [ssd_net.backbone, ssd_net.extras]
     elif args.freeze == 2:
-        print('Freeze vgg, extras, conf, loc')
+        print('Freeze backbone, extras, conf, loc')
         freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.conf, ssd_net.loc]
     elif args.freeze == 3:
-        print('Freeze vgg, extras, rnn, attention, conf, loc')
+        print('Freeze backbone, extras, rnn, attention, conf, loc')
         if args.attention:
             freeze_nets = [ssd_net.vgg, ssd_net.extras, ssd_net.rnn, ssd_net.attention, ssd_net.loc, ssd_net.conf]
         else:
@@ -285,6 +287,10 @@ def orthogonal(param):
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
         xavier(m.weight.data)
+        if m.bias is not None:
+            m.bias.data.zero_()
+    elif isinstance(m, nn.BatchNorm2d):
+        m.weight.data.fill_(1)
         m.bias.data.zero_()
 
 def conv_weights_init(m):
@@ -492,9 +498,10 @@ def train():
         t1 = time.time()
 
         if iteration % 10 == 0:
-            # print('Timer: %.4f sec.' % (t1 - t0))
-            # print('iter ' + repr(iteration) + ' || Loss: %.4f || lr: %.5f' % (loss.data[0], optimizer.param_groups[0]['lr']), end=' ')
-            logging.info('iter ' + repr(iteration) + '||Loss: %.4f, lr: %.5f||Timer: %.4f sec.' % (loss.data[0], optimizer.param_groups[0]['lr'], t1 - t0))
+            if args.attention:
+                logging.info('iter ' + repr(iteration) + '||Loss: %.4f, Loss_l: %.4f, Loss_c: %.4f, Loss_att: %.4f, lr: %.5f||Timer: %.4f sec.' % (loss.data[0], loss_l.data[0], loss_c.data[0], args.loss_coe[2]*loss_att.data[0], optimizer.param_groups[0]['lr'], t1 - t0))
+            else:
+                logging.info('iter ' + repr(iteration) + '||Loss: %.4f, Loss_l: %.4f, Loss_c: %.4f, lr: %.5f||Timer: %.4f sec.' % (loss.data[0], loss_l.data[0], loss_c.data[0], optimizer.param_groups[0]['lr'], t1 - t0))
 
             if args.visdom and args.send_images_to_visdom:
                 random_batch_index = np.random.randint(images.size(0))
@@ -543,7 +550,7 @@ def train():
                 update='append'
             )
 
-        if iteration>0 and iteration % 5000 == 0:
+        if iteration>0 and iteration % args.save_interval == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), os.path.join(args.save_folder, 'ssd'+ str(ssd_dim) + '_' + args.dataset_name + '_' +
                        repr(iteration) + '.pth'))

@@ -60,6 +60,7 @@ parser.add_argument('--refine', default=False, type=str2bool, help='dynamic set 
 parser.add_argument('--tub', default=0, type=int, help='tubelet max size')
 parser.add_argument('--tub_thresh', default=0.95, type=float, help='> : generate tubelet')
 parser.add_argument('--tub_generate_score', default=0.7, type=float, help='> : generate tubelet')
+parser.add_argument('--backbone',  default='ResNet101', type=str, help='vgg or resnet')
 
 args = parser.parse_args()
 
@@ -92,7 +93,7 @@ elif args.dataset_name == 'VID2017':
 dataset_mean = (104, 117, 123)
 ssd_dim = args.ssd_dim
 pkl_dir = os.path.join(args.save_folder, args.model_dir.split('/')[-1])
-if args.model_dir.split('/')[-1] in ['ssd300_VIDDET', 'ssd300_VIDDET_186', 'ssd300c512_VIDDET','ssd300_VIDDET_512','attssd300_VIDDET_512', 'attssd300_VIDDET_512_atthalf']:
+if 'VIDDET' in args.model_dir.split('/')[-1]:
     trained_model = os.path.join(args.model_dir, 'ssd300_VIDDET_' + args.literation +'.pth')
 else:
     if args.tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm']:
@@ -423,7 +424,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     state = [None] * 6 if tssd in ['lstm', 'edlstm', 'tblstm','tbedlstm', 'gru', 'outlstm'] else None
     pre_video_name = None
     for i in range(num_images):
-        im, gt, h, w, _ = dataset.pull_item(i)
+        # im, gt, h, w, _ = dataset.pull_item(i)
+        im, h, w = dataset.pull_transformed_image(i)
         # if len(gt) == 0:
         #     continue
         img_id = dataset.pull_img_id(i)
@@ -441,7 +443,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             x = x.cuda()
         if tssd == 'ssd':
             _t['im_detect'].tic()
-            detections,_ = net(x)
+            detections = net(x)
             detect_time = _t['im_detect'].toc(average=False)
             detections = detections.data
         else:
@@ -468,8 +470,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             cls_dets = np.hstack((boxes.cpu().numpy(), scores[:, np.newaxis])) \
                 .astype(np.float32, copy=False)
             all_boxes[j][i] = cls_dets
-        if i % (int(num_images / 3)) == 0:
-            print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
+        # if i % (int(num_images / 3)) == 0:
+        print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
                                                     num_images, detect_time))
     print('all time:', all_time)
     with open(det_file, 'wb') as f:
@@ -496,7 +498,14 @@ if __name__ == '__main__':
                                AnnotationTransform(dataset_name=args.dataset_name),
                                dataset_name=args.dataset_name, set_file_name=args.set_file_name)
     if args.detection:
-        net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
+        if 'ResNet' in args.backbone:
+            from ssd_resnet import build_net
+            net = build_net('test', backbone='ResNet101', prior='300', size=args.ssd_dim, num_classes=num_classes,
+                            pm=0., c7_channel=512, tssd=(True, False)[args.tssd == 'ssd'], attention=args.attention,
+                            top_k=args.top_k, thresh=args.confidence_threshold, nms_thresh=args.nms_threshold)
+        else:
+            from ssd import build_ssd
+            net = build_ssd('test', ssd_dim, num_classes, tssd=args.tssd,
                         top_k=args.top_k,
                         thresh=args.confidence_threshold,
                         nms_thresh=args.nms_threshold,
